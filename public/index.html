@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>一见 · 公众号排版工作台</title>
+    <meta name="description" content="本机运行的微信公众号排版工作台：模板、素材、封面与草稿发布。" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b5432a'/%3E%3Ctext x='32' y='44' font-size='34' text-anchor='middle' fill='%23fffaf4' font-family='serif'%3E%E8%A7%81%3C/text%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-seal" aria-hidden="true">见</div>
+          <div class="brand-text">
+            <strong>一见</strong>
+            <span>公众号排版工作台</span>
+          </div>
+        </div>
+
+        <div class="doc-head">
+          <div class="save-state" id="saveState">
+            <span class="save-dot"></span>
+            <span id="saveText">已保存</span>
+          </div>
+        </div>
+
+        <div class="top-actions">
+          <button class="icon-btn mobile-only" id="btnSidebarToggle" title="打开面板"><span data-icon="panel"></span></button>
+          <button class="btn btn-ghost" id="btnPreviewToggle" title="打开/关闭手机预览"><span data-icon="eye"></span><span class="label">预览</span></button>
+          <button class="btn" id="btnCopy" title="复制排版到公众号"><span data-icon="copy"></span><span class="label">复制到公众号</span></button>
+          <button class="btn btn-accent" id="btnPublish" title="发布到公众号草稿箱"><span data-icon="send"></span><span class="label">发布草稿</span></button>
+          <button class="icon-btn" id="btnSettings" title="接口与账号设置"><span data-icon="settings"></span></button>
+        </div>
+      </header>
+
+      <main class="workspace">
+        <aside class="sidebar" id="sidebar">
+          <nav class="side-tabs" role="tablist">
+            <button class="side-tab active" data-tab="themes" role="tab">模板</button>
+            <button class="side-tab" data-tab="styles" role="tab">样式</button>
+            <button class="side-tab" data-tab="assets" role="tab">素材</button>
+            <button class="side-tab" data-tab="cover" role="tab">封面</button>
+            <button class="side-tab" data-tab="articles" role="tab">文章</button>
+          </nav>
+
+          <div class="side-body">
+            <section class="side-panel" data-panel="themes">
+              <div class="panel-head">
+                <p class="eyebrow">Reading experience</p>
+                <h2>选择一套排版</h2>
+                <p class="panel-desc">26 套完整排版，切换后手机预览即时更新。复制时所有样式都会内联。</p>
+              </div>
+              <div class="style-chips theme-groups" id="themeGroups">
+                <button class="active" data-theme-group="original" type="button">一见原创 · 6</button>
+                <button data-theme-group="imported" type="button">开源主题 · 20</button>
+              </div>
+              <div class="theme-grid" id="themeGrid"></div>
+              <p class="source-note" id="themeSourceNote">一见原创主题，适合日常写作与长文阅读。</p>
+
+              <div class="setting-card">
+                <div class="setting-title">排版微调 <span id="themeName">纸间</span></div>
+                <div class="field-row">
+                  <span>字号</span>
+                  <div class="segmented" id="fontSizeSeg"></div>
+                </div>
+                <div class="field-row">
+                  <span>行距</span>
+                  <div class="segmented" id="lineHeightSeg"></div>
+                </div>
+                <div class="field-row accent-row">
+                  <span>强调色</span>
+                  <div class="accent-swatches" id="accentSwatches"></div>
+                </div>
+                <button class="link-btn" id="btnResetOptions">恢复模板默认</button>
+              </div>
+            </section>
+
+            <section class="side-panel" data-panel="styles" hidden>
+              <div class="panel-head">
+                <p class="eyebrow">Style library</p>
+                <h2>样式中心</h2>
+                <p class="panel-desc">点击插入到光标处，再替换占位文字。组件会继承当前模板和强调色。</p>
+              </div>
+              <label class="style-search">
+                <span data-icon="search"></span>
+                <input id="styleSearch" type="search" placeholder="搜索标题、卡片、步骤……" autocomplete="off" />
+              </label>
+              <div class="style-chips" id="styleCategories"></div>
+              <div class="style-list" id="styleList"></div>
+              <p class="panel-footnote">收藏仅保存在当前浏览器。所有组件均为一见原创，不使用第三方付费素材。</p>
+            </section>
+
+            <section class="side-panel" data-panel="assets" hidden>
+              <div class="panel-head panel-head-row">
+                <div>
+                  <p class="eyebrow">Material library</p>
+                  <h2>素材库</h2>
+                </div>
+                <button class="icon-btn" id="btnUploadTop" title="上传图片"><span data-icon="upload"></span></button>
+              </div>
+              <button class="gallery-source" id="btnWxGallery" type="button">
+                <span class="gallery-source-icon" data-icon="image"></span>
+                <span><strong>公众号图库</strong><small>选择已上传的永久图片素材</small></span>
+                <span data-icon="chevron-right"></span>
+              </button>
+              <label class="dropzone" id="dropzone">
+                <span class="dropzone-icon" data-icon="image"></span>
+                <strong>拖入图片，或点击上传</strong>
+                <span>自动压缩到公众号友好尺寸</span>
+                <input type="file" id="fileInput" accept="image/*" multiple hidden />
+              </label>
+              <div class="asset-grid" id="assetGrid"></div>
+              <p class="empty" id="assetEmpty">还没有素材，上传第一张图片吧。</p>
+              <p class="panel-footnote" id="assetFootnote">点击本机素材即可插入正文；公众号图库支持分页、多选，且不会修改线上素材。</p>
+            </section>
+
+            <section class="side-panel" data-panel="cover" hidden>
+              <div class="panel-head">
+                <p class="eyebrow">Cover studio</p>
+                <h2>文章封面</h2>
+                <p class="panel-desc">公众号首图比例 2.35 : 1。发布草稿时，封面会作为永久素材上传。</p>
+              </div>
+              <div class="cover-preview" id="coverPreview"></div>
+              <div class="button-row">
+                <button class="btn btn-dark" id="btnCoverStudio"><span data-icon="sparkles"></span>封面工坊</button>
+                <button class="btn" id="btnCoverPick"><span data-icon="image"></span>从素材选</button>
+                <button class="btn" id="btnCoverCrop" hidden><span data-icon="crop"></span>裁剪</button>
+              </div>
+              <button class="link-btn danger" id="btnCoverRemove">移除封面</button>
+              <div class="hint-card">
+                <strong>小提示</strong>
+                <span>封面会出现在公众号对话列表和分享卡片里。标题控制在 12 字以内，缩略后更清晰。</span>
+              </div>
+            </section>
+
+            <section class="side-panel" data-panel="articles" hidden>
+              <div class="panel-head panel-head-row">
+                <div>
+                  <p class="eyebrow">Article library</p>
+                  <h2>文章</h2>
+                </div>
+                <div class="new-article-wrap">
+                  <button class="btn btn-sm btn-dark" id="btnNewArticle" type="button"><span data-icon="plus"></span>新建<span class="new-kind-caret" data-icon="chevron-down"></span></button>
+                  <div class="new-article-menu" id="newArticleMenu" hidden>
+                    <button type="button" data-new-kind="article">
+                      <span class="new-kind-icon"><span data-icon="file"></span></span>
+                      <span><strong>新建文章</strong><small>Markdown 排版，发布为图文</small></span>
+                    </button>
+                    <button type="button" data-new-kind="pic">
+                      <span class="new-kind-icon pic"><span data-icon="image"></span></span>
+                      <span><strong>新建贴图</strong><small>1–20 张图 + 文案，发布为图片消息</small></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="article-view-switch" role="tablist" aria-label="文章来源">
+                <button class="active" data-article-view="local" type="button" role="tab" aria-selected="true">本机文章</button>
+                <button data-article-view="drafts" type="button" role="tab" aria-selected="false">草稿箱</button>
+                <button data-article-view="published" type="button" role="tab" aria-selected="false">发布记录</button>
+              </div>
+              <div id="localArticlesView">
+                <div class="article-list" id="articleList"></div>
+                <div class="button-row">
+                  <button class="btn btn-sm" id="btnImport"><span data-icon="upload"></span>导入文档</button>
+                  <button class="btn btn-sm" id="btnExportMd"><span data-icon="download"></span>导出 .md</button>
+                  <input type="file" id="importInput" accept=".docx,.html,.htm,.md,.markdown,.txt" hidden />
+                </div>
+                <button class="link-btn" id="btnCopyHtml">复制 HTML 源码</button>
+                <button class="link-btn" id="btnExportHtml">导出完整 HTML 文件</button>
+                <p class="panel-footnote">草稿会自动保存在本机 data/ 目录，刷新页面不会丢失。</p>
+              </div>
+              <div id="draftArticlesView" hidden>
+                <div class="published-toolbar">
+                  <span id="draftSummary">公众号草稿箱</span>
+                  <button class="icon-btn" id="draftRefresh" title="刷新草稿箱" type="button"><span data-icon="refresh"></span></button>
+                </div>
+                <div class="published-list" id="draftList"></div>
+                <button class="btn published-load-more" id="draftLoadMore" type="button" hidden>加载更多</button>
+                <p class="panel-footnote">只读查看公众号草稿箱，不会修改或删除线上草稿。个人号若无草稿箱接口权限，会返回 48001。</p>
+              </div>
+              <div id="publishedArticlesView" hidden>
+                <div class="published-toolbar">
+                  <span id="publishedSummary">公众号发布档案</span>
+                  <button class="icon-btn" id="publishedRefresh" title="刷新发布记录" type="button"><span data-icon="refresh"></span></button>
+                </div>
+                <div class="published-list" id="publishedList"></div>
+                <button class="btn published-load-more" id="publishedLoadMore" type="button" hidden>加载更多</button>
+                <p class="panel-footnote">只读显示微信“发布能力”的成功发布记录，不包含本机草稿，也不会修改线上文章。</p>
+              </div>
+            </section>
+          </div>
+        </aside>
+
+        <section class="editor-pane">
+          <div class="pane-head editor-head">
+            <div class="article-heading">
+              <p class="eyebrow" id="editorEyebrow">文章 · Markdown <span class="title-count" id="titleCount" hidden></span></p>
+              <input id="titleInput" class="article-title-input" maxlength="64" placeholder="输入文章标题" autocomplete="off" />
+              <label class="article-author">
+                <span class="article-author-label"><span data-icon="user"></span>作者</span>
+                <input id="authorInput" maxlength="40" placeholder="未署名" autocomplete="off" title="发布到公众号时，作者最多 8 个字符" />
+              </label>
+            </div>
+            <div class="pane-head-actions">
+              <span class="theme-pill" id="editorThemePill">纸间</span>
+              <button class="btn btn-sm ai-launch" id="btnAiBeautify" title="用 AI 润色文字并优化排版"><span data-icon="sparkles"></span><span class="ai-label">AI 美化</span></button>
+              <button class="icon-btn" id="btnHelp" title="格式说明"><span data-icon="help"></span></button>
+            </div>
+          </div>
+          <div class="toolbar" id="toolbar"></div>
+          <div class="toolbar pic-toolbar" id="picToolbar" hidden>
+            <button class="tb-btn wide" data-pic-action="add" type="button" title="从本机或公众号图库添加图片"><span data-icon="plus"></span>添加图片</button>
+            <span class="tb-sep"></span>
+            <button class="tb-btn wide" data-pic-action="gallery" type="button" title="从公众号永久素材中选择图片"><span data-icon="image"></span>公众号图库</button>
+            <span class="tb-sep"></span>
+            <span class="pic-toolbar-hint">首图即封面，拖动图片可排序</span>
+            <span class="spacer"></span>
+            <span class="pic-toolbar-count" id="picToolbarCount">0 / 20 张</span>
+          </div>
+          <div class="editor-scroll">
+            <textarea id="editor" spellcheck="false" placeholder="从这里开始写……&#10;&#10;支持 Markdown、富文本粘贴、Word 导入，也可以直接粘贴截图。"></textarea>
+            <div class="pic-editor" id="picEditor" hidden>
+              <div class="pic-section pic-writing">
+                <div class="pic-section-head">
+                  <label class="pic-section-title" for="picCopy">贴图文案</label>
+                  <span class="pic-copy-count" id="picCopyCount">0 / 1000</span>
+                </div>
+                <textarea id="picCopy" maxlength="1000" spellcheck="false" placeholder="说点什么……这段文字会显示在图片下方。选中一句后可以用 AI 扩写。"></textarea>
+              </div>
+              <div class="pic-section pic-images">
+                <div class="pic-section-head">
+                  <span class="pic-section-title">图片 <span class="pic-section-count" id="picCount">0 / 20</span></span>
+                  <span class="pic-section-note">首图即封面 · 拖动排序</span>
+                </div>
+                <div class="pic-grid" id="picGrid"></div>
+              </div>
+            </div>
+          </div>
+          <div class="editor-foot">
+            <span id="editorStats">0 字</span>
+            <span class="foot-dot"></span>
+            <span id="editorReading">约 1 分钟</span>
+            <span class="foot-dot"></span>
+            <span id="editorImages">0 张图片</span>
+            <span class="spacer"></span>
+            <span class="md-hint" id="editorHint">Markdown · 富文本粘贴 · 截图上传</span>
+          </div>
+        </section>
+
+        <aside class="preview-pane" id="previewPane">
+          <div class="preview-head">
+            <div>
+              <p class="eyebrow">Live preview</p>
+              <h2>手机预览</h2>
+            </div>
+            <span class="live-pill"><i></i>所见即所得</span>
+          </div>
+          <div class="device">
+            <div class="device-screen">
+              <div class="wx-status">
+                <span>9:41</span>
+                <svg width="40" height="11" viewBox="0 0 40 11" fill="none" aria-hidden="true">
+                  <rect x="0" y="7" width="3" height="4" rx="0.6" fill="#1c1b19" />
+                  <rect x="5" y="5" width="3" height="6" rx="0.6" fill="#1c1b19" />
+                  <rect x="10" y="3" width="3" height="8" rx="0.6" fill="#1c1b19" />
+                  <rect x="15" y="1" width="3" height="10" rx="0.6" fill="#1c1b19" />
+                  <path d="M23 4.6c2-1.8 5-1.8 7 0" stroke="#1c1b19" stroke-width="1.2" stroke-linecap="round" />
+                  <path d="M24.5 7c1.2-1 2.8-1 4 0" stroke="#1c1b19" stroke-width="1.2" stroke-linecap="round" />
+                  <circle cx="26.5" cy="9.3" r="0.9" fill="#1c1b19" />
+                  <rect x="33" y="2.5" width="6" height="6" rx="1.2" stroke="#1c1b19" />
+                  <rect x="34" y="3.5" width="4" height="4" rx="0.6" fill="#1c1b19" />
+                </svg>
+              </div>
+              <div class="wx-nav">
+                <span class="wx-nav-icon" data-icon="arrow-left"></span>
+                <span>公众号</span>
+                <span class="wx-nav-icon" data-icon="more"></span>
+              </div>
+              <div class="wx-scroll" id="wxScroll">
+                <div class="wx-account">
+                  <div class="wx-avatar" id="wxAvatar">墨</div>
+                  <div class="wx-account-info">
+                    <strong id="wxAccountName">我的公众号</strong>
+                    <span id="wxDate">2026年11月7日</span>
+                  </div>
+                  <span class="wx-follow">关注</span>
+                </div>
+                <h1 class="wx-title" id="wxTitle">文章标题</h1>
+                <div class="wx-meta" id="wxMeta">一见 · 约 1 分钟</div>
+                <div class="wx-content" id="wxContent"></div>
+                <div class="wx-end"><span></span><em>完</em><span></span></div>
+              </div>
+            </div>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <div id="aiContinueBubble" class="ai-continue" hidden></div>
+    <div id="modalRoot"></div>
+    <div class="toast-stack" id="toastStack"></div>
+
+    <script src="/vendor/dompurify/purify.min.js"></script>
+    <script src="/vendor/turndown/turndown.js"></script>
+    <script src="/vendor/turndown-plugin-gfm/turndown-plugin-gfm.js"></script>
+    <script src="/vendor/mammoth/mammoth.browser.min.js"></script>
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
