@@ -74,6 +74,7 @@ uploads/                  上传图片与生成封面，已 gitignore
 
 ## 7. 数据与品牌兼容
 
+- **多账号模型**：`data/settings.json` 结构为 `{ accounts: [{id, accountName, author, appId, appSecret}], activeAccountId, aiBaseUrl, aiModel, aiApiKey }`；每篇文章带 `accountId` 绑定账号，前端列表按当前账号过滤。微信调用一律走 `activeAccount()`，access_token 按 AppID 独立缓存；AI 配置全局共用。贴图图库图片带来源 `accountId`，仅同账号发布才复用 media_id。
 - localStorage 键（`mojian.current`、`mojian.preview`、`mojian.style-favorites` 等）是历史遗留标识，**改名会导致用户丢失本机草稿与收藏，禁止改动**。
 - `package.json` 的 `name`（mojian-wechat-studio）同为历史标识；面向用户的品牌名统一为「一见」。
 - 用户要求品牌 / 名称改动时：必须全量覆盖 UI 文案、README、package.json、favicon、示例署名等所有出现位置，并实际打开页面核对，不得只改一半。

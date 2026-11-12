@@ -36,6 +36,10 @@ export const api = {
   deleteUpload: (file, force = false) =>
     request('DELETE', `/api/uploads/${encodeURIComponent(file)}${force ? '?force=1' : ''}`),
   saveSettings: (payload) => request('PUT', '/api/settings', payload),
+  createAccount: (payload) => request('POST', '/api/accounts', payload),
+  saveAccount: (id, payload) => request('PUT', `/api/accounts/${id}`, payload),
+  deleteAccount: (id, force = false) => request('DELETE', `/api/accounts/${id}${force ? '?force=1' : ''}`),
+  activateAccount: (id) => request('POST', '/api/accounts/activate', { id }),
   testWeChat: () => request('POST', '/api/wechat/test'),
   wechatMaterials: ({ offset = 0, count = 20 } = {}) =>
     request('GET', `/api/wechat/materials?offset=${offset}&count=${count}`),

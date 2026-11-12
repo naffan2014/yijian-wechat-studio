@@ -16,7 +16,7 @@ const state = {
   articles: [],
   current: null,
   uploads: [],
-  settings: { appId: '', hasSecret: false, accountName: '我的公众号', author: '', aiBaseUrl: '', aiModel: '', hasAiKey: false },
+  settings: { appId: '', hasSecret: false, accountName: '我的公众号', author: '', aiBaseUrl: '', aiModel: '', hasAiKey: false, accounts: [], activeAccountId: '' },
   lastRender: null,
   editSeq: 0,
   saveTimer: null,
@@ -110,14 +110,77 @@ async function init() {
       state.articles = [res.article];
     }
 
-    const lastId = localStorage.getItem(CURRENT_KEY);
-    const current = state.articles.find((item) => item.id === lastId) || state.articles[0];
-    setCurrent(current);
+    await ensureCurrentForAccount();
     renderAssets();
     updateAccountUI();
     setSave('saved', '已保存');
   } catch (err) {
     toast(`初始化失败：${err.message}`, 'error', 6000);
+  }
+}
+
+/* ------------------------------ 多账号数据流 ------------------------------ */
+
+function visibleArticles() {
+  const accountId = state.settings.activeAccountId;
+  if (!accountId) return state.articles;
+  return state.articles.filter((article) => article.accountId === accountId);
+}
+
+function activeAccountInfo() {
+  const accounts = state.settings.accounts || [];
+  return accounts.find((acc) => acc.id === state.settings.activeAccountId) || accounts[0] || null;
+}
+
+// 当前账号下选出要打开的文章：优先上次编辑的，其次最近更新的一篇；
+// 账号下还没有文章时自动新建一篇，保持画布始终可用。
+async function ensureCurrentForAccount({ kind = 'article' } = {}) {
+  const visible = visibleArticles();
+  const lastId = localStorage.getItem(CURRENT_KEY);
+  const current = visible.find((item) => item.id === lastId) || visible[0];
+  if (current) {
+    setCurrent(current);
+    return;
+  }
+  const pic = kind === 'pic';
+  const res = await api.createArticle({
+    kind,
+    title: pic ? '未命名贴图' : '未命名文章',
+    themeId: 'paper',
+    images: pic ? [] : undefined,
+    copy: pic ? '' : undefined,
+  });
+  state.articles.unshift(res.article);
+  setCurrent(res.article);
+}
+
+// 切换账号后，发布记录 / 草稿箱等账号级面板要清空重读
+function resetAccountScopedState() {
+  state.published = { items: [], offset: 0, total: 0, hasMore: false, loaded: false, loading: false, error: '', errorCode: '', requestId: state.published.requestId + 1 };
+  state.drafts = { items: [], offset: 0, total: 0, hasMore: false, loaded: false, loading: false, error: '', errorCode: '', requestId: state.drafts.requestId + 1 };
+  if (state.articleView === 'drafts') {
+    renderDraftList();
+    loadDrafts(true);
+  }
+  if (state.articleView === 'published') {
+    renderPublishedList();
+    loadPublished(true);
+  }
+}
+
+async function switchAccount(id) {
+  if (!id || id === state.settings.activeAccountId) return;
+  await saveNow();
+  try {
+    const res = await api.activateAccount(id);
+    state.settings = res.settings;
+    resetAccountScopedState();
+    updateAccountUI();
+    await ensureCurrentForAccount();
+    renderAssets();
+    toast(`已切换到「${state.settings.accountName || '我的公众号'}」`, 'success');
+  } catch (err) {
+    toast(err.message, 'error');
   }
 }
 
@@ -520,7 +583,11 @@ function renderArticleList() {
     $('#articleList').innerHTML = '<p class="empty">还没有文章。</p>';
     return;
   }
-  const list = [...state.articles].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  const list = visibleArticles().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
+  if (!list.length) {
+    $('#articleList').innerHTML = '<p class="empty">这个账号还没有文章，点上方「新建」开始。</p>';
+    return;
+  }
   $('#articleList').innerHTML = list
     .map((article) => {
       const active = article.id === state.current.id ? 'active' : '';
@@ -867,6 +934,65 @@ function updateAccountUI() {
   $('#wxAccountName').textContent = name;
   $('#wxAvatar').textContent = name.slice(0, 1);
   $('#authorInput').placeholder = state.settings.author ? `默认：${state.settings.author}` : '未署名';
+  renderAccountSwitcher();
+}
+
+/* ------------------------------ 账号切换器 ------------------------------ */
+
+function renderAccountSwitcher() {
+  const accounts = state.settings.accounts || [];
+  const activeId = state.settings.activeAccountId;
+  const active = activeAccountInfo();
+  const name = active?.accountName || '我的公众号';
+  $('#accountSwitchName').textContent = name;
+  $('#accountSwitchAvatar').textContent = name.slice(0, 1);
+  $('#accountSwitchBtn').title = `当前账号：${name}（点击切换）`;
+
+  const menu = $('#accountMenu');
+  menu.innerHTML = accounts.map((acc) => {
+    const isActive = acc.id === activeId;
+    const sub = acc.appId ? `${escapeHtml(acc.appId)}${acc.hasSecret ? '' : ' · 未填密钥'}` : '未配置接口，仅本机写作';
+    return `<button class="account-menu-item ${isActive ? 'active' : ''}" data-account-id="${escapeHtml(acc.id)}" type="button">
+      <span class="account-menu-avatar">${escapeHtml((acc.accountName || '号').slice(0, 1))}</span>
+      <span class="account-menu-info">
+        <strong>${escapeHtml(acc.accountName || '我的公众号')}</strong>
+        <span>${sub}</span>
+      </span>
+      ${isActive ? `<span class="account-menu-check">${icon('check', 13)}当前</span>` : ''}
+    </button>`;
+  }).join('') + `
+    <button class="account-menu-item account-menu-manage" data-account-manage type="button">
+      ${icon('settings', 14)}<span>管理账号 / 添加账号…</span>
+    </button>`;
+}
+
+function closeAccountMenu() {
+  const menu = $('#accountMenu');
+  if (menu) menu.hidden = true;
+}
+
+function bindAccountSwitcher() {
+  const btn = $('#accountSwitchBtn');
+  const menu = $('#accountMenu');
+  btn.addEventListener('click', (event) => {
+    event.stopPropagation();
+    menu.hidden = !menu.hidden;
+  });
+  menu.addEventListener('click', async (event) => {
+    const item = event.target.closest('[data-account-id]');
+    if (item) {
+      closeAccountMenu();
+      await switchAccount(item.dataset.accountId);
+      return;
+    }
+    if (event.target.closest('[data-account-manage]')) {
+      closeAccountMenu();
+      openSettings();
+    }
+  });
+  document.addEventListener('click', (event) => {
+    if (!event.target.closest('#accountSwitch')) closeAccountMenu();
+  });
 }
 
 /* --------------------------------- assets --------------------------------- */
@@ -1307,6 +1433,10 @@ function formDialog({ title, subtitle, fields, confirmText = '确定' }) {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (!$('#accountMenu').hidden) {
+    closeAccountMenu();
+    return;
+  }
   if (aiContinueBubble.visible) {
     hideAiContinue();
     return;
@@ -1375,6 +1505,8 @@ function toPicImage(item) {
     height: Number(item.height) || 0,
     source,
     mediaId: source === 'wechat' ? item.mediaId || '' : '',
+    // 图库素材的 media_id 与账号绑定，记录来源账号，跨账号发布时服务端会改走下载重传
+    accountId: source === 'wechat' ? item.accountId || state.settings.activeAccountId : '',
   };
 }
 
@@ -1634,36 +1766,40 @@ function openWeChatGallery({ onPick } = {}) {
 
 /* -------------------------------- settings -------------------------------- */
 
-function settingsFieldsHtml() {
-  const settings = state.settings;
-  return `<div class="form-grid">
-      <div class="field">
-        <label>公众号名称</label>
-        <input name="accountName" value="${escapeHtml(settings.accountName)}" maxlength="40" placeholder="我的公众号" />
-        <span class="hint">显示在预览顶部和封面工坊中</span>
+function accountRowsHtml() {
+  const accounts = state.settings.accounts || [];
+  const activeId = state.settings.activeAccountId;
+  return accounts.map((acc) => {
+    const isActive = acc.id === activeId;
+    const sub = acc.appId
+      ? `${escapeHtml(acc.appId)}${acc.hasSecret ? ' · 密钥已保存' : ' · 未填密钥'}`
+      : '未配置接口，仅本机写作与复制文字';
+    return `<div class="account-row ${isActive ? 'active' : ''}">
+      <span class="account-row-avatar">${escapeHtml((acc.accountName || '号').slice(0, 1))}</span>
+      <div class="account-row-info">
+        <strong>${escapeHtml(acc.accountName || '我的公众号')}${isActive ? '<span class="account-row-badge">当前</span>' : ''}</strong>
+        <span>${sub}</span>
       </div>
-      <div class="field">
-        <label>默认作者</label>
-        <input name="author" value="${escapeHtml(settings.author)}" maxlength="40" placeholder="作者名" />
-        <span class="hint">微信作者栏建议不超过 8 个字符</span>
+      <div class="account-row-actions">
+        ${isActive ? '' : `<button class="btn btn-sm" data-acc-switch="${escapeHtml(acc.id)}" type="button">切换</button>`}
+        <button class="btn btn-sm" data-acc-edit="${escapeHtml(acc.id)}" type="button">编辑</button>
+        <button class="btn btn-sm" data-acc-delete="${escapeHtml(acc.id)}" type="button">删除</button>
       </div>
-      <div class="field">
-        <label>AppID</label>
-        <input name="appId" value="${escapeHtml(settings.appId)}" placeholder="wx..." autocomplete="off" />
-      </div>
-      <div class="field">
-        <label>AppSecret</label>
-        <input name="appSecret" type="password" placeholder="${settings.hasSecret ? '已保存，留空不修改' : '填写 AppSecret'}" autocomplete="new-password" />
-        <span class="hint">${settings.hasSecret ? '密钥已保存在本机，界面不会回显。' : '在公众号后台「设置与开发 → 基本配置」获取。'}</span>
-      </div>
-    </div>
-    <p class="config-note">草稿箱接口通常需要已认证的公众号，并把本机公网 IP 加入「IP 白名单」。AppSecret 只保存在本机 data/settings.json（权限 600）。</p>
-    <p class="config-note">AI 美化使用独立的 OpenAI 兼容接口，在文章页点「AI 美化」即可配置模型，不需要公众号凭证。</p>
-    <div class="config-actions">
-      <button class="btn btn-sm" data-test-wx type="button">${icon('refresh', 14)}测试连接</button>
-      <span class="config-result" data-test-result></span>
-      ${settings.hasSecret ? '<button class="link-btn danger" id="btnClearSecret" style="margin-left:auto">清除密钥</button>' : ''}
     </div>`;
+  }).join('');
+}
+
+function settingsBodyHtml() {
+  return `<div class="form-section">
+      <div class="form-section-head">
+        <h4>公众号账号</h4>
+        <span class="hint" style="font-size:10.5px;color:var(--muted)">文章跟随账号保存，切换账号后只显示该账号的文章</span>
+      </div>
+      <div class="account-rows" id="accountRows">${accountRowsHtml()}</div>
+      <button class="btn btn-sm" id="btnAddAccount" type="button">${icon('plus', 14)}添加账号</button>
+    </div>
+    <p class="config-note">每个账号独立保存名称、默认作者、AppID 与 AppSecret；密钥只保存在本机 data/settings.json（权限 600），界面不会回显。草稿箱接口通常需要已认证的公众号，并把本机公网 IP 加入「IP 白名单」。</p>
+    <p class="config-note">AI 美化 / 续写使用独立的 OpenAI 兼容接口，所有账号共用，在文章页点「AI 美化」即可配置模型，不需要公众号凭证。</p>`;
 }
 
 function configFieldsHtml() {
@@ -1738,41 +1874,250 @@ function bindTestButton(root) {
 
 function openSettings() {
   openModal({
-    title: '接口与账号',
-    subtitle: '配置公众号名称、作者与接口凭证。所有信息只保存在这台电脑上。',
-    body: settingsFieldsHtml(),
+    title: '账号与接口',
+    subtitle: '管理多个公众号账号，文章跟随账号保存。所有信息只保存在这台电脑上。',
+    body: settingsBodyHtml(),
     width: 700,
-    footer: `<button class="btn" data-close type="button">取消</button><button class="btn btn-accent" id="settingsSave" type="button">保存设置</button>`,
+    footer: `<button class="btn" data-footer-close type="button">关闭</button>`,
+    onMount(root) {
+      const rows = $('#accountRows', root);
+      const refresh = () => {
+        rows.innerHTML = accountRowsHtml();
+      };
+      rows.addEventListener('click', async (event) => {
+        const switchBtn = event.target.closest('[data-acc-switch]');
+        if (switchBtn) {
+          await switchAccount(switchBtn.dataset.accSwitch);
+          refresh();
+          return;
+        }
+        const editBtn = event.target.closest('[data-acc-edit]');
+        if (editBtn) {
+          const acc = (state.settings.accounts || []).find((item) => item.id === editBtn.dataset.accEdit);
+          if (acc) openAccountEditor(acc, refresh);
+          return;
+        }
+        const deleteBtn = event.target.closest('[data-acc-delete]');
+        if (deleteBtn) {
+          await deleteAccountFlow(deleteBtn.dataset.accDelete, refresh);
+        }
+      });
+      $('#btnAddAccount', root).addEventListener('click', () => openAccountEditor(null, refresh));
+    },
+  });
+}
+
+async function deleteAccountFlow(id, refresh) {
+  const acc = (state.settings.accounts || []).find((item) => item.id === id);
+  if (!acc) return;
+  if ((state.settings.accounts || []).length <= 1) {
+    toast('至少需要保留一个公众号账号', 'error');
+    return;
+  }
+  const boundCount = state.articles.filter((article) => article.accountId === id).length;
+  const ok = await confirmDialog({
+    title: '删除这个公众号账号？',
+    message: boundCount
+      ? `「${acc.accountName || '我的公众号'}」下的 ${boundCount} 篇文章会一并从本机删除，操作不可撤销。公众号线上内容不受影响。`
+      : `「${acc.accountName || '我的公众号'}」的账号配置会从本机删除，操作不可撤销。公众号线上内容不受影响。`,
+    confirmText: '删除',
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const wasActive = state.settings.activeAccountId === id;
+    const res = await api.deleteAccount(id, boundCount > 0);
+    state.articles = state.articles.filter((article) => article.accountId !== id);
+    state.settings = res.settings;
+    if (wasActive) {
+      resetAccountScopedState();
+      await ensureCurrentForAccount();
+    }
+    updateAccountUI();
+    renderArticleList();
+    refresh?.();
+    toast('账号已删除', 'success');
+  } catch (err) {
+    toast(err.message, 'error', 4500);
+  }
+}
+
+function openAccountEditor(account, onSaved) {
+  const isNew = !account;
+  const acc = account || { id: '', accountName: '', author: '', appId: '', hasSecret: false };
+  const body = `<div class="form-grid">
+      <div class="field">
+        <label>公众号名称</label>
+        <input name="accountName" value="${escapeHtml(acc.accountName)}" maxlength="40" placeholder="我的公众号" />
+        <span class="hint">显示在预览顶部和封面工坊中</span>
+      </div>
+      <div class="field">
+        <label>默认作者</label>
+        <input name="author" value="${escapeHtml(acc.author)}" maxlength="40" placeholder="作者名" />
+        <span class="hint">微信作者栏建议不超过 8 个字符</span>
+      </div>
+      <div class="field">
+        <label>AppID</label>
+        <input name="appId" value="${escapeHtml(acc.appId)}" placeholder="wx...（可不填，仅本机写作）" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label>AppSecret</label>
+        <input name="appSecret" type="password" placeholder="${acc.hasSecret ? '已保存，留空不修改' : '填写 AppSecret'}" autocomplete="new-password" />
+        <span class="hint">${acc.hasSecret ? '密钥已保存在本机，界面不会回显。' : '在公众号后台「设置与开发 → 基本配置」获取。'}</span>
+      </div>
+    </div>
+    <div class="config-actions">
+      <button class="btn btn-sm" data-test-wx type="button">${icon('refresh', 14)}保存并测试连接</button>
+      <span class="config-result" data-test-result></span>
+      ${!isNew && acc.hasSecret ? '<button class="link-btn danger" id="accClearSecret" style="margin-left:auto">清除密钥</button>' : ''}
+    </div>
+    <p class="config-note">${isNew ? '新账号保存后会自动切换为当前账号。' : ''}不填 AppID / AppSecret 也可以保存，用来纯本机写作；配置接口后才能传图、读图库和写草稿箱。</p>`;
+
+  openModal({
+    title: isNew ? '添加公众号账号' : `编辑账号 · ${escapeHtml(acc.accountName || '我的公众号')}`,
+    subtitle: '凭证只保存在本机，不会回传到浏览器。',
+    body,
+    width: 640,
+    footer: `<button class="btn" data-footer-close type="button">取消</button>
+      <button class="btn btn-accent" id="accountSave" type="button">${isNew ? '添加账号' : '保存账号'}</button>`,
     onMount(root, close) {
-      bindTestButton(root);
-      $('#settingsSave', root).addEventListener('click', async () => {
-        const button = $('#settingsSave', root);
-        button.disabled = true;
-        try {
-          await saveSettingsFromRoot(root, { withAccount: true });
+      // 新账号首次保存成功后记录已创建的账号 ID：之后的保存一律走更新，
+      // 避免关闭动画期间重复点击「添加账号」再次 POST 出第二个账号
+      let createdId = null;
+      let saving = false;
+      let closed = false;
+      let savedSecret = acc.hasSecret;
+      let savedAppId = acc.appId;
+      let savedName = acc.accountName;
+
+      const collect = () => {
+        const field = (name) => root.querySelector(`[name="${name}"]`);
+        const accountName = (field('accountName').value || '').trim();
+        const author = (field('author').value || '').trim();
+        const appId = (field('appId').value || '').trim();
+        const appSecret = (field('appSecret').value || '').trim();
+        if (appId || appSecret) {
+          if (!appId) throw new Error('请填写 AppID');
+          if (!appSecret) {
+            if (savedSecret && appId === savedAppId) {
+              // 沿用已保存的密钥，不需要重填
+            } else if (savedSecret) {
+              throw new Error('更换 AppID 时，需要同时填写新的 AppSecret');
+            } else {
+              throw new Error('请填写 AppSecret');
+            }
+          }
+        }
+        const payload = {
+          accountName: accountName || (isNew && !createdId ? '新公众号' : savedName || '我的公众号'),
+          author,
+          appId,
+        };
+        if (appSecret) payload.appSecret = appSecret;
+        return payload;
+      };
+
+      const save = async () => {
+        const payload = collect();
+        if (isNew && !createdId) {
+          await saveNow();
+          const res = await api.createAccount(payload);
+          createdId = res.account.id;
+          state.settings = res.settings;
+          resetAccountScopedState();
+          updateAccountUI();
+          await ensureCurrentForAccount();
+        } else {
+          const res = await api.saveAccount(createdId || acc.id, payload);
+          state.settings = res.settings;
+          updateAccountUI();
           renderPreview();
-          toast('设置已保存', 'success');
+        }
+        savedAppId = payload.appId;
+        savedName = payload.accountName;
+        if (payload.appSecret) savedSecret = true;
+        onSaved?.();
+        return payload;
+      };
+
+      $('#accountSave', root).addEventListener('click', async () => {
+        if (saving || closed) return;
+        saving = true;
+        const button = $('#accountSave', root);
+        button.disabled = true;
+        const firstCreate = isNew && !createdId;
+        try {
+          await save();
+          toast(firstCreate ? '已添加并切换到新账号' : '账号已保存', 'success');
+          closed = true;
           close();
         } catch (err) {
           toast(err.message, 'error', 4500);
         } finally {
-          button.disabled = false;
+          saving = false;
+          if (!closed) button.disabled = false;
         }
       });
-      const clear = $('#btnClearSecret', root);
+
+      const testBtn = root.querySelector('[data-test-wx]');
+      testBtn.addEventListener('click', async () => {
+        if (saving || closed) return;
+        saving = true;
+        const result = root.querySelector('[data-test-result]');
+        result.textContent = '正在保存并连接微信…';
+        result.className = 'config-result';
+        testBtn.disabled = true;
+        const saveBtn = $('#accountSave', root);
+        saveBtn.disabled = true;
+        const firstCreate = isNew && !createdId;
+        try {
+          const appId = root.querySelector('[name="appId"]').value.trim();
+          const secret = root.querySelector('[name="appSecret"]').value.trim();
+          if (!appId || (!secret && !(savedSecret && appId === savedAppId))) {
+            throw new Error('请先填写 AppID 和 AppSecret 再测试连接');
+          }
+          await save();
+          await api.testWeChat();
+          result.textContent = '连接成功，凭证有效';
+          result.className = 'config-result ok';
+          if (firstCreate) {
+            // 新账号已创建成功，直接关闭编辑器，避免停留在「添加」态再次新建
+            toast('已添加并切换到新账号，微信接口连接成功', 'success');
+            closed = true;
+            close();
+          } else {
+            toast('微信接口连接成功', 'success');
+          }
+        } catch (err) {
+          result.textContent = err.message;
+          result.className = 'config-result bad';
+        } finally {
+          saving = false;
+          if (!closed) {
+            testBtn.disabled = false;
+            saveBtn.disabled = false;
+          }
+        }
+      });
+
+      const clear = $('#accClearSecret', root);
       if (clear) {
         clear.addEventListener('click', async () => {
+          if (saving || closed) return;
           const ok = await confirmDialog({
-            title: '清除接口密钥？',
+            title: '清除这个账号的密钥？',
             message: '清除后需要重新填写 AppSecret 才能使用复制带图与草稿发布功能。',
             confirmText: '清除',
             danger: true,
           });
           if (!ok) return;
           try {
-            const res = await api.saveSettings({ clearSecret: true });
+            const res = await api.saveAccount(acc.id, { clearSecret: true });
             state.settings = res.settings;
+            updateAccountUI();
+            onSaved?.();
             toast('密钥已清除', 'success');
+            closed = true;
             close();
           } catch (err) {
             toast(err.message, 'error');
@@ -1784,6 +2129,11 @@ function openSettings() {
 }
 
 /* --------------------------------- publish -------------------------------- */
+
+function publishTargetHtml() {
+  const name = state.settings.accountName || '我的公众号';
+  return `<div class="publish-target-account">${icon('user', 13)}<span>目标账号</span><strong>${escapeHtml(name)}</strong><span class="hint">如需换号，请先在顶栏切换账号</span></div>`;
+}
 
 function localBodyCoverImage(src) {
   if (!src) return null;
@@ -2167,6 +2517,7 @@ function openPicPublish() {
 
   const body = `<div id="publishError"></div>
     <div id="publishProgress" hidden></div>
+    ${publishTargetHtml()}
     <div class="publish-type-strip">
       <span class="theme-pill">贴图 · 图片消息</span>
       <span>首图将作为封面，写入草稿箱后仍需到公众号后台手动发表。</span>
@@ -2306,6 +2657,7 @@ function openPublish() {
 
   const body = `<div id="publishError"></div>
     <div id="publishProgress" hidden></div>
+    ${publishTargetHtml()}
     <div class="form-grid">
       <div class="field full">
         <label>标题</label>
@@ -3467,7 +3819,7 @@ async function copyArticle() {
     const go = await confirmDialog({
       title: `文章含 ${localCount} 张本地图片`,
       message:
-        '还没配置公众号接口，微信无法读取本机图片。\n\n配置接口后，「复制到公众号」会自动上传图片；也可以只复制文字排版，稍后在微信编辑器里手动插图。',
+        `当前账号「${state.settings.accountName || '我的公众号'}」还没配置公众号接口，微信无法读取本机图片。\n\n配置接口后，「复制到公众号」会自动上传图片；也可以只复制文字排版，稍后在微信编辑器里手动插图。`,
       confirmText: '只复制文字',
       cancelText: '去配置接口',
     });
@@ -3481,7 +3833,7 @@ async function copyArticle() {
 
   try {
     await copyRich(html, plainText(state.current.markdown));
-    toast('已复制排版，粘贴到公众号编辑器即可', 'success', 4200);
+    toast(`已复制排版（${state.settings.accountName || '我的公众号'}），粘贴到公众号编辑器即可`, 'success', 4200);
   } catch (err) {
     toast(`复制失败：${err.message}`, 'error');
   }
@@ -3706,6 +4058,9 @@ function toast(message, type = 'default', timeout = 3200) {
 /* ------------------------------ static events ----------------------------- */
 
 function bindStaticEvents() {
+  // 顶栏账号切换
+  bindAccountSwitcher();
+
   // tabs
   $$('.side-tab').forEach((button) => {
     button.addEventListener('click', () => {
@@ -4313,8 +4668,9 @@ async function deleteArticle(id) {
     await api.deleteArticle(id);
     state.articles = state.articles.filter((item) => item.id !== id);
     if (state.current?.id === id) {
-      if (state.articles.length) {
-        setCurrent(state.articles[0]);
+      const visible = visibleArticles();
+      if (visible.length) {
+        setCurrent(visible[0]);
       } else {
         await newArticle({ kind: article.kind });
       }

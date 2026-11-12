@@ -157,6 +157,33 @@ async function init() {
   settings = await readJson(SETTINGS_FILE, {});
   uploadMeta = await readJson(UPLOADS_META_FILE, {});
 
+  // 多账号迁移：旧版单账号字段收进 accounts[0]，之后只认 accounts 数组
+  if (!Array.isArray(settings.accounts) || settings.accounts.length === 0) {
+    const legacy = {
+      id: crypto.randomUUID(),
+      accountName: typeof settings.accountName === 'string' && settings.accountName ? settings.accountName : '我的公众号',
+      author: typeof settings.author === 'string' ? settings.author : '',
+      appId: typeof settings.appId === 'string' ? settings.appId : '',
+      appSecret: typeof settings.appSecret === 'string' ? settings.appSecret : '',
+    };
+    settings.accounts = [legacy];
+    settings.activeAccountId = legacy.id;
+  }
+  delete settings.accountName;
+  delete settings.author;
+  delete settings.appId;
+  delete settings.appSecret;
+  settings.accounts = settings.accounts.map((acc) => ({
+    id: typeof acc.id === 'string' && acc.id ? acc.id : crypto.randomUUID(),
+    accountName: typeof acc.accountName === 'string' && acc.accountName ? acc.accountName : '我的公众号',
+    author: typeof acc.author === 'string' ? acc.author : '',
+    appId: typeof acc.appId === 'string' ? acc.appId : '',
+    appSecret: typeof acc.appSecret === 'string' ? acc.appSecret : '',
+  }));
+  if (!settings.accounts.some((acc) => acc.id === settings.activeAccountId)) {
+    settings.activeAccountId = settings.accounts[0].id;
+  }
+
   let changedMeta = false;
   for (const sample of SAMPLE_IMAGES) {
     const src = path.join(SAMPLE_DIR, sample.file);
@@ -183,10 +210,17 @@ async function init() {
     await persistArticles();
   }
 
-  if (!settings.accountName) settings.accountName = '我的公众号';
-  if (typeof settings.author !== 'string') settings.author = '';
-  if (typeof settings.appId !== 'string') settings.appId = '';
-  if (typeof settings.appSecret !== 'string') settings.appSecret = '';
+  // 文章绑定账号：旧数据统一归到迁移出的第一个账号；指向已不存在账号的文章也修复到当前账号
+  let articlesChanged = false;
+  articles = articles.map((article) => {
+    if (!article.accountId || !settings.accounts.some((acc) => acc.id === article.accountId)) {
+      articlesChanged = true;
+      return { ...article, accountId: settings.activeAccountId };
+    }
+    return article;
+  });
+  if (articlesChanged) await persistArticles();
+
   if (typeof settings.aiBaseUrl !== 'string') settings.aiBaseUrl = '';
   if (settings.aiBaseUrl) {
     try {
@@ -204,15 +238,32 @@ async function init() {
 
 /* --------------------------------- helpers -------------------------------- */
 
-function publicSettings() {
+function activeAccount() {
+  return settings.accounts.find((acc) => acc.id === settings.activeAccountId) || settings.accounts[0];
+}
+
+function publicAccount(acc) {
   return {
-    appId: settings.appId || '',
-    hasSecret: Boolean(settings.appSecret),
-    accountName: settings.accountName || '我的公众号',
-    author: settings.author || '',
+    id: acc.id,
+    accountName: acc.accountName || '我的公众号',
+    author: acc.author || '',
+    appId: acc.appId || '',
+    hasSecret: Boolean(acc.appSecret),
+  };
+}
+
+function publicSettings() {
+  const acc = activeAccount();
+  return {
+    appId: acc.appId || '',
+    hasSecret: Boolean(acc.appSecret),
+    accountName: acc.accountName || '我的公众号',
+    author: acc.author || '',
     aiBaseUrl: settings.aiBaseUrl || '',
     aiModel: settings.aiModel || '',
     hasAiKey: Boolean(settings.aiApiKey),
+    accounts: settings.accounts.map(publicAccount),
+    activeAccountId: settings.activeAccountId,
   };
 }
 
@@ -276,6 +327,8 @@ function normalizePicImage(value) {
     height: Number(value.height) || 0,
     source: value.source === 'wechat' ? 'wechat' : 'local',
     mediaId: cleanText(value.mediaId, 256),
+    // 图库图片的 media_id 只在来源账号内有效，记录下来供发布时校验
+    accountId: cleanText(value.accountId, 64),
   };
 }
 
@@ -422,7 +475,7 @@ async function handlePicDraft(body) {
     warnings.push('作者名超过 8 个字符，已按微信限制截断');
   }
 
-  const token = await wechat.getToken(settings);
+  const token = await wechat.getToken(activeAccount());
   const mediaIds = [];
   let uploaded = 0;
   let reused = 0;
@@ -430,8 +483,10 @@ async function handlePicDraft(body) {
   for (let index = 0; index < images.length; index += 1) {
     const image = images[index];
     try {
-      // 公众号图库图片本身就是永久素材，能直接复用 media_id 时不再重复上传
-      if (image.source === 'wechat' && image.mediaId) {
+      // 公众号图库图片本身就是永久素材，能直接复用 media_id 时不再重复上传。
+      // media_id 与账号绑定：只有来源账号与当前发布账号一致才复用，
+      // 跨账号或旧数据（无 accountId）走下面的下载重传兜底。
+      if (image.source === 'wechat' && image.mediaId && image.accountId === activeAccount().id) {
         mediaIds.push(image.mediaId);
         reused += 1;
         continue;
@@ -520,7 +575,7 @@ async function handleArticlePublish(body) {
     throw new ApiError(400, '发布前需要一张封面图，请从本机素材或正文里的公众号图片中选择');
   }
 
-  const token = await wechat.getToken(settings);
+  const token = await wechat.getToken(activeAccount());
 
   const prepared = await wechat.prepareContentWithToken(content, UPLOAD_DIR, token);
   if (prepared.skipped.length) {
@@ -574,6 +629,7 @@ async function handleApi(req, res, pathname, url) {
     const article = {
       id: crypto.randomUUID(),
       kind,
+      accountId: settings.activeAccountId,
       title: cleanText(body.title, 200) || (kind === 'pic' ? '未命名贴图' : '未命名文章'),
       markdown: kind === 'pic' ? '' : String(body.markdown || ''),
       themeId: kind === 'pic' ? 'paper' : body.themeId || 'paper',
@@ -721,13 +777,15 @@ async function handleApi(req, res, pathname, url) {
 
   if (req.method === 'PUT' && pathname === '/api/settings') {
     const body = await readBody(req);
-    if (typeof body.appId === 'string') settings.appId = body.appId.trim();
+    // 账号字段作用于当前账号；AI 配置全局共用
+    const acc = activeAccount();
+    if (typeof body.appId === 'string') acc.appId = body.appId.trim();
     if (typeof body.appSecret === 'string' && body.appSecret.trim()) {
-      settings.appSecret = body.appSecret.trim();
+      acc.appSecret = body.appSecret.trim();
     }
-    if (body.clearSecret) settings.appSecret = '';
-    if (typeof body.accountName === 'string') settings.accountName = body.accountName.trim().slice(0, 40) || '我的公众号';
-    if (typeof body.author === 'string') settings.author = body.author.trim().slice(0, 40);
+    if (body.clearSecret) acc.appSecret = '';
+    if (typeof body.accountName === 'string') acc.accountName = body.accountName.trim().slice(0, 40) || '我的公众号';
+    if (typeof body.author === 'string') acc.author = body.author.trim().slice(0, 40);
     if (typeof body.aiBaseUrl === 'string') {
       const baseUrl = body.aiBaseUrl.trim();
       if (baseUrl) {
@@ -748,6 +806,73 @@ async function handleApi(req, res, pathname, url) {
     if (body.clearAiKey) settings.aiApiKey = '';
     await persistSettings();
     return sendJson(res, 200, { ok: true, settings: publicSettings() });
+  }
+
+  /* ------------------------------ 多账号管理 ------------------------------ */
+
+  if (req.method === 'POST' && pathname === '/api/accounts') {
+    const body = await readBody(req);
+    const acc = {
+      id: crypto.randomUUID(),
+      accountName: cleanText(body.accountName, 40) || '新公众号',
+      author: cleanText(body.author, 40),
+      appId: cleanText(body.appId, 100),
+      appSecret: typeof body.appSecret === 'string' ? body.appSecret.trim().slice(0, 200) : '',
+    };
+    settings.accounts.push(acc);
+    // 新建后直接切到新账号，方便接着配置和写作
+    settings.activeAccountId = acc.id;
+    await persistSettings();
+    return sendJson(res, 200, { ok: true, settings: publicSettings(), account: publicAccount(acc) });
+  }
+
+  if (req.method === 'POST' && pathname === '/api/accounts/activate') {
+    const body = await readBody(req);
+    const acc = settings.accounts.find((item) => item.id === body.id);
+    if (!acc) throw new ApiError(404, '账号不存在');
+    settings.activeAccountId = acc.id;
+    await persistSettings();
+    return sendJson(res, 200, { ok: true, settings: publicSettings() });
+  }
+
+  const accountMatch = pathname.match(/^\/api\/accounts\/([0-9a-fA-F-]+)$/);
+  if (accountMatch) {
+    const acc = settings.accounts.find((item) => item.id === accountMatch[1]);
+    if (!acc) throw new ApiError(404, '账号不存在');
+
+    if (req.method === 'PUT') {
+      const body = await readBody(req);
+      if (typeof body.accountName === 'string') acc.accountName = body.accountName.trim().slice(0, 40) || '我的公众号';
+      if (typeof body.author === 'string') acc.author = body.author.trim().slice(0, 40);
+      if (typeof body.appId === 'string') acc.appId = body.appId.trim().slice(0, 100);
+      if (typeof body.appSecret === 'string' && body.appSecret.trim()) {
+        acc.appSecret = body.appSecret.trim().slice(0, 200);
+      }
+      if (body.clearSecret) acc.appSecret = '';
+      await persistSettings();
+      return sendJson(res, 200, { ok: true, settings: publicSettings() });
+    }
+
+    if (req.method === 'DELETE') {
+      if (settings.accounts.length <= 1) {
+        throw new ApiError(400, '至少需要保留一个公众号账号');
+      }
+      const bound = articles.filter((article) => article.accountId === acc.id);
+      const force = url.searchParams.get('force') === '1';
+      if (bound.length && !force) {
+        throw new ApiError(409, `该账号下还有 ${bound.length} 篇文章，删除账号会一并删除这些文章`, { articleCount: bound.length });
+      }
+      if (bound.length) {
+        articles = articles.filter((article) => article.accountId !== acc.id);
+        await persistArticles();
+      }
+      settings.accounts = settings.accounts.filter((item) => item.id !== acc.id);
+      if (settings.activeAccountId === acc.id) {
+        settings.activeAccountId = settings.accounts[0].id;
+      }
+      await persistSettings();
+      return sendJson(res, 200, { ok: true, settings: publicSettings(), removedArticles: bound.length });
+    }
   }
 
   if (req.method === 'POST' && pathname === '/api/ai/models') {
@@ -774,7 +899,7 @@ async function handleApi(req, res, pathname, url) {
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(count) || count < 1 || count > 20) {
       throw new ApiError(400, '图库分页参数不正确：offset 需不小于 0，count 范围为 1–20');
     }
-    const token = await wechat.getToken(settings);
+    const token = await wechat.getToken(activeAccount());
     const data = await wechat.listPermanentImages(token, { offset, count });
     const items = data.item.map((item) => ({
       mediaId: cleanText(item.media_id, 256),
@@ -800,7 +925,7 @@ async function handleApi(req, res, pathname, url) {
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(count) || count < 1 || count > 20) {
       throw new ApiError(400, '发布记录分页参数不正确：offset 需不小于 0，count 范围为 1–20');
     }
-    const token = await wechat.getToken(settings);
+    const token = await wechat.getToken(activeAccount());
     const data = await wechat.listPublished(token, { offset, count });
     const items = data.item.flatMap((record) => {
       const news = Array.isArray(record.content?.news_item) ? record.content.news_item : [];
@@ -843,7 +968,7 @@ async function handleApi(req, res, pathname, url) {
     if (!Number.isInteger(offset) || offset < 0 || !Number.isInteger(count) || count < 1 || count > 20) {
       throw new ApiError(400, '草稿箱分页参数不正确：offset 需不小于 0，count 范围为 1–20');
     }
-    const token = await wechat.getToken(settings);
+    const token = await wechat.getToken(activeAccount());
     const data = await wechat.listDrafts(token, { offset, count });
     const items = data.item.map((record) => {
       const news = Array.isArray(record.content?.news_item) ? record.content.news_item : [];
@@ -883,7 +1008,7 @@ async function handleApi(req, res, pathname, url) {
   }
 
   if (req.method === 'POST' && pathname === '/api/wechat/test') {
-    await wechat.getToken(settings, true);
+    await wechat.getToken(activeAccount(), true);
     return sendJson(res, 200, {
       ok: true,
       message: '连接成功，接口凭证有效',
@@ -894,7 +1019,7 @@ async function handleApi(req, res, pathname, url) {
     const body = await readBody(req);
     const content = String(body.content || '');
     if (!content.trim()) throw new ApiError(400, '内容为空');
-    const token = await wechat.getToken(settings);
+    const token = await wechat.getToken(activeAccount());
     const result = await wechat.prepareContentWithToken(content, UPLOAD_DIR, token);
     return sendJson(res, 200, {
       ok: true,
