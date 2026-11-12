@@ -38,7 +38,8 @@ public/js/app.js          交互、自动保存、复制/发布、弹窗（大�
 public/js/markdown.js     Markdown / 样式组件 → 内联样式 HTML
 public/js/themes.js       6 套原创模板与主题合并入口
 public/js/imported-themes.js  20 套花生编辑器开源主题（MIT）
-public/js/components.js   17 个原创样式组件
+public/js/components.js   28 个原创样式组件（含 11 个图标结构化组件）
+public/js/glyphs.js       115 个图标（Unicode 字符 + CSS 图形）与图标参数解析
 public/js/import.js       富文本、DOCX、HTML 安全转换
 public/js/cover.js        Canvas 封面生成与裁剪
 public/js/api.js          前端 API 封装
@@ -51,7 +52,7 @@ uploads/                  上传图片与生成封面，已 gitignore
 ## 4. 硬性约束（红线，任何任务都不得违反）
 
 1. **保持零依赖**：不引入 npm 运行时依赖、构建工具、前端框架、CDN 链接。确需新的浏览器第三方库时，下载放入 `public/vendor/` 并在 `public/vendor/licenses/` 保留许可证。
-2. **排版输出必须内联样式**：微信编辑器会清洗 class 与外部样式。`markdown.js` / `themes.js` / `components.js` 生成的 HTML 必须全部携带 inline style；正文背景色依赖双层 section 兜底，不得改成单层。
+2. **排版输出必须内联样式**：微信编辑器会清洗 class 与外部样式。`markdown.js` / `themes.js` / `components.js` / `glyphs.js` 生成的 HTML 必须全部携带 inline style，且不得输出 `<svg>` / `<img>` / `class`（图标只能用 Unicode 字符与 CSS 图形绘制）；正文背景色依赖双层 section 兜底，不得改成单层。
 3. **微信侧限制不得放宽**（代码中已有校验）：正文 HTML ≤ 20,000 字符且 ≤ 1MB；正文图片仅 JPG/PNG、单张 ≤ 1MB；封面 2.35:1（1080×460）；标题 ≤ 64、作者 ≤ 8、摘要 ≤ 120；贴图（newspic）标题 ≤ 32、文案 ≤ 1000 字、图片 1–20 张。
 4. **微信线上资源只读**：公众号图库、草稿箱、发布记录均为只读读取，不得新增对线上素材 / 草稿 / 已发布文章的修改或删除操作；发布只写入草稿箱（`draft/add`），不得调用 `freepublish/submit` 自动群发。
 5. **纯本机运行**：服务绑定 `127.0.0.1`，不得改为 `0.0.0.0`；不得加入任何遥测、统计或向第三方上传内容的逻辑。
@@ -75,7 +76,7 @@ uploads/                  上传图片与生成封面，已 gitignore
 ## 7. 数据与品牌兼容
 
 - **多账号模型**：`data/settings.json` 结构为 `{ accounts: [{id, accountName, author, appId, appSecret}], activeAccountId, aiBaseUrl, aiModel, aiApiKey }`；每篇文章带 `accountId` 绑定账号，前端列表按当前账号过滤。微信调用一律走 `activeAccount()`，access_token 按 AppID 独立缓存；AI 配置全局共用。贴图图库图片带来源 `accountId`，仅同账号发布才复用 media_id。
-- localStorage 键（`mojian.current`、`mojian.preview`、`mojian.style-favorites` 等）是历史遗留标识，**改名会导致用户丢失本机草稿与收藏，禁止改动**。
+- localStorage 键（`mojian.current`、`mojian.preview`、`mojian.style-favorites`、`mojian.icon-studio` 等）是历史遗留标识，**改名会导致用户丢失本机草稿与收藏，禁止改动**。
 - `package.json` 的 `name`（mojian-wechat-studio）同为历史标识；面向用户的品牌名统一为「一见」。
 - 用户要求品牌 / 名称改动时：必须全量覆盖 UI 文案、README、package.json、favicon、示例署名等所有出现位置，并实际打开页面核对，不得只改一半。
 - `data/*.json` 结构变更必须向后兼容：读取旧数据时自动补默认值，不得要求用户手动清空数据。

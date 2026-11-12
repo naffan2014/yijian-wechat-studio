@@ -89,15 +89,96 @@
               <div class="panel-head">
                 <p class="eyebrow">Style library</p>
                 <h2>样式中心</h2>
-                <p class="panel-desc">点击插入到光标处，再替换占位文字。组件会继承当前模板和强调色。</p>
+                <p class="panel-desc" id="stylePanelDesc">点击插入到光标处，再替换占位文字。组件会继承当前模板和强调色。</p>
+              </div>
+              <div class="mode-switch" id="styleMode" role="tablist" aria-label="样式中心模式">
+                <button class="active" data-style-mode="components" type="button" role="tab" aria-selected="true">排版组件 <em id="styleModeComponentCount">28</em></button>
+                <button data-style-mode="icons" type="button" role="tab" aria-selected="false">图标工坊 <em id="styleModeIconCount">115</em></button>
               </div>
               <label class="style-search">
                 <span data-icon="search"></span>
                 <input id="styleSearch" type="search" placeholder="搜索标题、卡片、步骤……" autocomplete="off" />
               </label>
-              <div class="style-chips" id="styleCategories"></div>
-              <div class="style-list" id="styleList"></div>
-              <p class="panel-footnote">收藏仅保存在当前浏览器。所有组件均为一见原创，不使用第三方付费素材。</p>
+
+              <div id="styleComponentView">
+                <div class="style-chips" id="styleCategories"></div>
+                <div class="style-list" id="styleList"></div>
+                <p class="panel-footnote">收藏仅保存在当前浏览器。所有组件均为一见原创，不使用第三方付费素材。</p>
+              </div>
+
+              <div id="styleIconView" hidden>
+                <div class="icon-studio">
+                  <div class="icon-stage" id="iconStage">
+                    <div class="icon-stage-solo" id="iconStageSolo"></div>
+                    <div class="icon-stage-side">
+                      <div class="icon-stage-line" id="iconStageLine"></div>
+                      <div class="icon-stage-meta">
+                        <strong id="iconStageName">实心星</strong>
+                        <code id="iconStageSyntax">:star:</code>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="icon-stage-actions">
+                    <button class="btn btn-sm btn-accent" id="btnIconInsert" type="button"><span data-icon="plus"></span>插入到正文</button>
+                    <button class="btn btn-sm" id="btnIconCopy" type="button"><span data-icon="copy"></span>复制语法</button>
+                    <button class="icon-btn sm" id="btnIconRandom" title="随机换一个图标" type="button"><span data-icon="refresh"></span></button>
+                    <button class="icon-btn sm" id="btnIconReset" title="恢复默认样式" type="button"><span data-icon="settings"></span></button>
+                  </div>
+                  <div class="icon-controls">
+                    <div class="icon-control">
+                      <label for="iconSize">尺寸 <output id="iconSizeOut">18</output></label>
+                      <input type="range" id="iconSize" min="12" max="48" step="1" value="18" />
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconShape">底座</label>
+                      <select id="iconShape" class="icon-select">
+                        <option value="none">无底座</option>
+                        <option value="circle">圆形底色</option>
+                        <option value="square">圆角方块</option>
+                        <option value="outline">描边圆圈</option>
+                      </select>
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconTint">底色浓度 <output id="iconTintOut">12</output></label>
+                      <input type="range" id="iconTint" min="0" max="45" step="1" value="12" />
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconWeight">线条 / 字重 <output id="iconWeightOut">500</output></label>
+                      <input type="range" id="iconWeight" min="300" max="900" step="50" value="500" />
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconGap">与文字间距 <output id="iconGapOut">4</output></label>
+                      <input type="range" id="iconGap" min="0" max="16" step="1" value="4" />
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconOpacity">不透明度 <output id="iconOpacityOut">100</output></label>
+                      <input type="range" id="iconOpacity" min="20" max="100" step="5" value="100" />
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconAlign">垂直对齐</label>
+                      <select id="iconAlign" class="icon-select">
+                        <option value="middle">居中</option>
+                        <option value="baseline">基线</option>
+                        <option value="text-bottom">文字底部</option>
+                        <option value="top">顶部</option>
+                      </select>
+                    </div>
+                    <div class="icon-control">
+                      <label for="iconColorPick">自定义色</label>
+                      <div class="icon-color-custom">
+                        <input type="color" id="iconColorPick" value="#b5432a" title="自定义图标颜色" />
+                        <button class="link-btn" id="btnIconColorFollow" type="button">跟随强调色</button>
+                      </div>
+                    </div>
+                    <div class="icon-control wide">
+                      <div class="icon-swatches" id="iconSwatches"></div>
+                    </div>
+                  </div>
+                  <div class="style-chips icon-groups" id="iconGroups"></div>
+                </div>
+                <div class="icon-grid" id="iconGrid"></div>
+                <p class="panel-footnote" id="iconFootnote">点击图标即插入到光标处，Shift + 点击只选中不插入。图标由字符与 CSS 图形绘制，不使用图片与 SVG，复制到公众号不掉格式，也不占素材配额。</p>
+              </div>
             </section>
 
             <section class="side-panel" data-panel="assets" hidden>
@@ -252,6 +333,7 @@
             <span id="editorReading">约 1 分钟</span>
             <span class="foot-dot"></span>
             <span id="editorImages">0 张图片</span>
+            <span class="html-budget" id="editorBudget" title="发布草稿时正文 HTML 上限 20000 字符">HTML 0 / 20k</span>
             <span class="spacer"></span>
             <span class="md-hint" id="editorHint">Markdown · 富文本粘贴 · 截图上传</span>
           </div>

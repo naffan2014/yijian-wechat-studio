@@ -56,6 +56,10 @@ const PATHS = {
   search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/>',
   star: '<path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9z"/>',
   chevron: '<path d="m6 9 6 6 6-6"/>',
+  shapes:
+    '<circle cx="6.5" cy="6.5" r="3.6"/><rect x="13.6" y="3" width="7.4" height="7.4" rx="1.6"/><path d="M6.5 13.4 10.4 20.6H2.6z"/><path d="M13.6 14.6h7.4M13.6 18h7.4M13.6 21.4h4.4"/>',
+  timeline:
+    '<path d="M6 3v18"/><circle cx="6" cy="7" r="2.2"/><circle cx="6" cy="17" r="2.2"/><path d="M11.5 7h9.5M11.5 17h6.5"/>',
 };
 
 export function icon(name, size = 18, className = '') {

@@ -1,4 +1,5 @@
 import { getTheme } from './themes.js';
+import { hasGlyph, renderGlyph, parseGlyphOptions, resolveGlyphColor } from './glyphs.js';
 
 /* ------------------------------- color utils ------------------------------ */
 
@@ -145,6 +146,24 @@ function inline(text, ctx, alreadyEscaped = false) {
       ? importedStyle(ctx, 'a')
       : `color:${ctx.accentText};text-decoration:none;border-bottom:1px solid ${rgba(ctx.accent, 0.4)};`;
     return keep(`<a href="${safeUrl(url)}" style="${style}">${inline(label, ctx, true)}</a>`);
+  });
+
+  // 行内图标 `:star:` / `:star{28,circle,#1d4ed8}:`
+  // 放在链接之后，避免把 URL 里的冒号误判成图标
+  out = out.replace(/:([a-zA-Z][a-zA-Z0-9-]{0,24})(?:\{([^{}]*)\})?:/g, (match, name, rawOptions) => {
+    if (!hasGlyph(name)) return match;
+    const options = parseGlyphOptions(rawOptions);
+    return keep(renderGlyph(name, {
+      size: Math.round(ctx.fs * 1.05),
+      shape: 'none',
+      tint: 12,
+      weight: 500,
+      gap: 0,
+      align: 'middle',
+      opacity: 100,
+      ...options,
+      color: resolveGlyphColor(options.color || 'accent', glyphPalette(ctx)),
+    }));
   });
 
   out = out.replace(/\*\*([^*]+)\*\*/g, (m, inner) =>
@@ -423,12 +442,237 @@ function componentLines(block) {
   return block.text.split('\n').map((line) => line.trim()).filter(Boolean);
 }
 
+/* ----------------------------- 图标类组件 ------------------------------- */
+
+function glyphPalette(ctx) {
+  const theme = ctx.theme;
+  return { accent: ctx.accent, text: theme.text, muted: theme.muted, heading: theme.heading, line: theme.line };
+}
+
+// 组件里画图标：默认圆形底座 + 主题强调色，尺寸随正文字号
+function componentGlyph(name, ctx, overrides = {}) {
+  const id = hasGlyph(name) ? String(name).trim().toLowerCase() : 'dot';
+  return renderGlyph(id, {
+    size: ctx.fs + 2,
+    color: ctx.accent,
+    shape: 'circle',
+    tint: 11,
+    weight: 500,
+    gap: 0,
+    align: 'middle',
+    opacity: 100,
+    ...overrides,
+  });
+}
+
+function componentFields(line) {
+  return String(line || '')
+    .replace(/^(?:\d+[.)]|[-*+])\s+/, '')
+    .split('|')
+    .map((part) => part.trim());
+}
+
+// 「图标名 | 标题 | 说明」；首段不是图标名时整行按「标题 | 说明」解析
+function iconRow(line, fallbackIcon = 'dot') {
+  const fields = componentFields(line);
+  if (hasGlyph(fields[0])) {
+    return { icon: fields[0].toLowerCase(), title: fields[1] || '', desc: fields.slice(2).join(' | ') };
+  }
+  return { icon: fallbackIcon, title: fields[0] || '', desc: fields.slice(1).join(' | ') };
+}
+
+function semanticPair(ctx) {
+  return ctx.isDark
+    ? { good: '#7ddba6', bad: '#f0a3a3' }
+    : { good: '#3f7d52', bad: '#c2410c' };
+}
+
+function renderTimeline(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const items = lines.map((line) => {
+    const fields = componentFields(line);
+    if (fields.length >= 3) return { time: fields[0], title: fields[1], desc: fields.slice(2).join(' | ') };
+    if (fields.length === 2) return { time: '', title: fields[0], desc: fields[1] };
+    return { time: '', title: fields[0] || '', desc: '' };
+  }).filter((item) => item.title || item.desc);
+
+  const rows = items.map((item, index) => {
+    const last = index === items.length - 1;
+    const rail = `<section style="flex-shrink:0;width:13px;display:flex;flex-direction:column;align-items:center;"><span style="flex-shrink:0;width:11px;height:11px;margin-top:${Math.round(ctx.fs * 0.45)}px;border-radius:50%;background-color:${theme.bg};border:2px solid ${ctx.accent};box-sizing:border-box;"></span><span style="flex:1;width:2px;margin-top:4px;background-color:${last ? 'transparent' : ctx.tint(0.24)};"></span></section>`;
+    const badge = item.time
+      ? `<section style="display:inline-block;margin-bottom:5px;padding:2px 9px;border-radius:999px;background-color:${ctx.tint(0.1)};color:${ctx.accentText};font-size:${Math.max(10, ctx.fs - 4)}px;line-height:1.6;font-weight:700;letter-spacing:0.06em;">${inline(item.time, ctx)}</section>`
+      : '';
+    const body = `<section style="flex:1;min-width:0;padding:0 0 ${last ? 0 : Math.round(ctx.fs * 1.15)}px 13px;">${badge}<section style="font-size:${ctx.fs}px;line-height:1.6;font-weight:700;color:${theme.heading};">${inline(item.title, ctx)}</section>${item.desc ? `<section style="margin-top:4px;font-size:${ctx.fs - 2}px;line-height:1.8;color:${theme.muted};">${inline(item.desc, ctx)}</section>` : ''}</section>`;
+    return `<section style="display:flex;align-items:stretch;">${rail}${body}</section>`;
+  }).join('');
+
+  return `<section style="margin:${top}px 0;">${componentHeading(block.title, ctx)}${rows}</section>`;
+}
+
+function renderIconList(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const rows = lines.map((line, index) => {
+    const item = iconRow(line);
+    return `<section style="display:flex;align-items:flex-start;${index ? `margin-top:${Math.round(ctx.fs * 0.9)}px;` : ''}">${componentGlyph(item.icon, ctx, { size: ctx.fs + 4 })}<section style="flex:1;min-width:0;margin-left:11px;"><section style="font-size:${ctx.fs}px;line-height:1.6;font-weight:700;color:${theme.heading};">${inline(item.title, ctx)}</section>${item.desc ? `<section style="margin-top:3px;font-size:${ctx.fs - 2}px;line-height:1.8;color:${theme.muted};">${inline(item.desc, ctx)}</section>` : ''}</section></section>`;
+  }).join('');
+  return `<section style="margin:${top}px 0;">${componentHeading(block.title, ctx)}${rows}</section>`;
+}
+
+function renderIconGrid(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const items = lines.map((line) => iconRow(line, 'sparkle')).filter((item) => item.title);
+  const cols = items.length <= 3 ? Math.max(1, items.length) : items.length === 4 ? 2 : 3;
+  const cells = items.map((item) => `<section style="width:${Math.round(10000 / cols) / 100}%;box-sizing:border-box;padding:4px;"><section style="height:100%;box-sizing:border-box;padding:14px 10px;text-align:center;background-color:${ctx.tint(0.045)};border:1px solid ${ctx.tint(0.14)};border-radius:${theme.radius}px;">${componentGlyph(item.icon, ctx, { size: ctx.fs + 6, tint: 12 })}<section style="margin-top:9px;font-size:${ctx.fs - 1}px;line-height:1.55;font-weight:700;color:${theme.heading};">${inline(item.title, ctx)}</section>${item.desc ? `<section style="margin-top:5px;font-size:${Math.max(10, ctx.fs - 3)}px;line-height:1.7;color:${theme.muted};">${inline(item.desc, ctx)}</section>` : ''}</section></section>`).join('');
+  return `<section style="margin:${top}px 0;">${block.title ? `<section style="margin-bottom:9px;text-align:center;font-size:${ctx.fs}px;line-height:1.6;font-weight:700;color:${theme.heading};">${inline(block.title, ctx)}</section>` : ''}<section style="display:flex;flex-wrap:wrap;align-items:stretch;">${cells}</section></section>`;
+}
+
+function renderFlow(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const items = lines.map((line) => iconRow(line, 'caret')).filter((item) => item.title);
+  const arrow = renderGlyph('right', { size: ctx.fs - 1, color: ctx.accent, shape: 'none', gap: 0, align: 'middle' });
+  const chips = items.map((item, index) => {
+    const chip = `<span style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;background-color:${ctx.tint(0.07)};border:1px solid ${ctx.tint(0.17)};border-radius:999px;font-size:${ctx.fs - 2}px;line-height:1.6;font-weight:600;color:${theme.heading};">${componentGlyph(item.icon, ctx, { size: ctx.fs - 2, shape: 'none' })}${inline(item.title, ctx)}</span>`;
+    return index ? `${arrow}${chip}` : chip;
+  }).join('');
+  return `<section style="margin:${top}px 0;">${componentHeading(block.title, ctx)}<section style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">${chips}</section></section>`;
+}
+
+function renderChecklist(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const pair = semanticPair(ctx);
+  const rows = lines.map((line, index) => {
+    const fields = componentFields(line);
+    let state = 'todo';
+    let text = fields.join(' | ');
+    if (/^(?:v|y|yes|done|1|✓)$/i.test(fields[0])) {
+      state = 'done';
+      text = fields.slice(1).join(' | ');
+    } else if (/^(?:x|n|no|✕|✗)$/i.test(fields[0])) {
+      state = 'no';
+      text = fields.slice(1).join(' | ');
+    } else if (/^(?:o|todo|0)$/i.test(fields[0])) {
+      text = fields.slice(1).join(' | ');
+    }
+    const mark = state === 'done'
+      ? componentGlyph('check-circle', ctx, { size: ctx.fs, shape: 'none', color: ctx.accent, weight: 600 })
+      : state === 'no'
+        ? componentGlyph('cross', ctx, { size: ctx.fs, shape: 'none', color: pair.bad, weight: 600 })
+        : componentGlyph('ring', ctx, { size: ctx.fs, shape: 'none', color: theme.muted });
+    const textStyle = state === 'no' ? `color:${theme.muted};text-decoration:line-through;` : `color:${theme.text};`;
+    return `<section style="display:flex;align-items:flex-start;${index ? `margin-top:${Math.round(ctx.fs * 0.6)}px;` : ''}">${mark}<span style="flex:1;min-width:0;margin-left:10px;font-size:${ctx.fs - 1}px;line-height:1.75;${textStyle}">${inline(text, ctx)}</span></section>`;
+  }).join('');
+  return `<section style="margin:${top}px 0;padding:16px 17px;border:1px solid ${theme.line};border-radius:${theme.radius}px;background-color:${ctx.tint(0.025)};">${componentHeading(block.title || '检查清单', ctx)}${rows}</section>`;
+}
+
+function renderTags(block, ctx, lines, top) {
+  const chips = lines.map((line) => {
+    const item = iconRow(line, '');
+    const icon = item.icon ? componentGlyph(item.icon, ctx, { size: ctx.fs - 3, shape: 'none' }) : '';
+    return `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 7px 7px 0;padding:5px 11px;background-color:${ctx.tint(0.08)};border:1px solid ${ctx.tint(0.18)};border-radius:999px;font-size:${Math.max(10, ctx.fs - 3)}px;line-height:1.6;color:${ctx.accentText};">${icon}${inline(item.title, ctx)}</span>`;
+  }).join('');
+  return `<section style="margin:${top}px 0;">${componentHeading(block.title, ctx)}<section style="display:flex;flex-wrap:wrap;align-items:center;">${chips}</section></section>`;
+}
+
+function renderMeta(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const rows = lines.map((line, index) => {
+    const item = iconRow(line, 'dot');
+    return `<section style="display:flex;align-items:flex-start;${index ? `margin-top:${Math.round(ctx.fs * 0.7)}px;` : ''}">${componentGlyph(item.icon, ctx, { size: ctx.fs, shape: 'none' })}<span style="flex-shrink:0;width:${Math.round(ctx.fs * 3.6)}px;margin-left:9px;font-size:${ctx.fs - 2}px;line-height:1.75;color:${theme.muted};">${inline(item.title, ctx)}</span><span style="flex:1;min-width:0;font-size:${ctx.fs - 1}px;line-height:1.75;color:${theme.text};">${inline(item.desc, ctx)}</span></section>`;
+  }).join('');
+  return `<section style="margin:${top}px 0;padding:15px 17px;background-color:${ctx.tint(0.05)};border-left:3px solid ${ctx.accent};border-radius:0 ${theme.radius}px ${theme.radius}px 0;">${componentHeading(block.title, ctx)}${rows}</section>`;
+}
+
+function renderVersus(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const pair = semanticPair(ctx);
+  const good = [];
+  const bad = [];
+  lines.forEach((line) => {
+    const fields = componentFields(line);
+    if (/^(?:x|n|no|✕|✗)$/i.test(fields[0])) bad.push(fields.slice(1).join(' | '));
+    else if (/^(?:v|y|yes|done|1|✓)$/i.test(fields[0])) good.push(fields.slice(1).join(' | '));
+    else good.push(fields.join(' | '));
+  });
+  const column = (items, kind) => {
+    const color = kind === 'good' ? pair.good : pair.bad;
+    const head = kind === 'good' ? '推荐' : '避免';
+    const mark = componentGlyph(kind === 'good' ? 'check' : 'cross', ctx, { size: ctx.fs - 2, shape: 'none', color, weight: 700 });
+    const rows = items.map((text, index) => `<section style="display:flex;align-items:flex-start;${index ? 'margin-top:8px;' : ''}">${mark}<span style="flex:1;min-width:0;margin-left:8px;font-size:${ctx.fs - 2}px;line-height:1.7;color:${theme.text};">${inline(text, ctx)}</span></section>`).join('');
+    return `<section style="flex:1;min-width:0;box-sizing:border-box;padding:13px 14px;background-color:${rgba(color, 0.06)};border:1px solid ${rgba(color, 0.18)};border-radius:${theme.radius}px;"><section style="margin-bottom:9px;font-size:${Math.max(10, ctx.fs - 3)}px;line-height:1.5;font-weight:700;letter-spacing:0.14em;color:${color};">${head}</section>${rows || `<section style="font-size:${ctx.fs - 2}px;line-height:1.7;color:${theme.muted};">—</section>`}</section>`;
+  };
+  return `<section style="margin:${top}px 0;">${block.title ? `<section style="margin-bottom:10px;text-align:center;font-size:${ctx.fs}px;line-height:1.6;font-weight:700;color:${theme.heading};">${inline(block.title, ctx)}</section>` : ''}<section style="display:flex;align-items:stretch;gap:10px;">${column(good, 'good')}${column(bad, 'bad')}</section></section>`;
+}
+
+function renderIconTitle(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const item = iconRow(block.title || '', 'sparkle');
+  const content = lines.map((line) => inline(line, ctx)).join('<br>');
+  const desc = item.desc || content;
+  return `<section style="margin:${top}px 0 ${Math.round(ctx.fs * 0.8)}px;"><section style="display:flex;align-items:center;">${componentGlyph(item.icon, ctx, { size: ctx.fs + 2, shape: 'square', tint: 12 })}<section style="flex:1;min-width:0;margin-left:11px;font-family:${escapeHtml(theme.headingFont)};font-size:${ctx.fs + 2}px;line-height:1.5;font-weight:700;color:${theme.heading};">${inline(item.title || '小标题', ctx)}</section></section>${desc ? `<section style="margin-top:8px;font-size:${ctx.fs - 1}px;line-height:${ctx.lh};color:${theme.muted};">${inline(item.desc, ctx)}${item.desc && content ? '<br>' : ''}${content}</section>` : ''}</section>`;
+}
+
+function renderIconDivider(block, ctx, top) {
+  const theme = ctx.theme;
+  const title = String(block.title || '').trim();
+  const middle = hasGlyph(title)
+    ? renderGlyph(title.toLowerCase(), { size: ctx.fs + 2, color: ctx.accent, shape: 'none', gap: 0, align: 'middle' })
+    : `<span style="font-size:12px;line-height:1.5;letter-spacing:0.18em;color:${ctx.accentText};">${inline(title || '✦', ctx)}</span>`;
+  return `<section style="margin:${Math.round(top * 1.4)}px 0;display:flex;align-items:center;gap:12px;"><span style="flex:1;height:1px;background-color:${theme.line};"></span>${middle}<span style="flex:1;height:1px;background-color:${theme.line};"></span></section>`;
+}
+
+function renderScore(block, ctx, lines, top) {
+  const theme = ctx.theme;
+  const rows = lines.map((line, index) => {
+    const fields = componentFields(line);
+    const label = fields[0] || '';
+    const raw = Number(String(fields[1] || '').replace(/[^\d.]/g, ''));
+    const value = Number.isFinite(raw) ? Math.min(5, Math.max(0, raw)) : 0;
+    const filled = Math.round(value);
+    const stars = `<span style="color:${ctx.accent};">${'★'.repeat(filled)}</span><span style="color:${theme.line};">${'☆'.repeat(5 - filled)}</span>`;
+    return `<section style="display:flex;align-items:center;${index ? `margin-top:${Math.round(ctx.fs * 0.55)}px;` : ''}"><span style="flex:1;min-width:0;font-size:${ctx.fs - 1}px;line-height:1.7;color:${theme.text};">${inline(label, ctx)}</span><span style="flex-shrink:0;margin:0 10px;font-size:${ctx.fs - 1}px;line-height:1;letter-spacing:3px;">${stars}</span><span style="flex-shrink:0;width:30px;text-align:right;font-size:${ctx.fs - 2}px;line-height:1.7;font-weight:700;color:${ctx.accentText};">${value.toFixed(1)}</span></section>`;
+  }).join('');
+  return `<section style="margin:${top}px 0;">${componentHeading(block.title, ctx)}${rows}</section>`;
+}
+
+function renderIconComponent(block, ctx) {
+  const lines = componentLines(block);
+  const top = Math.round(ctx.fs * 1.45);
+  switch (block.kind) {
+    case 'timeline':
+      return renderTimeline(block, ctx, lines, top);
+    case 'iconlist':
+      return renderIconList(block, ctx, lines, top);
+    case 'icongrid':
+      return renderIconGrid(block, ctx, lines, top);
+    case 'flow':
+      return renderFlow(block, ctx, lines, top);
+    case 'checklist':
+      return renderChecklist(block, ctx, lines, top);
+    case 'tags':
+      return renderTags(block, ctx, lines, top);
+    case 'meta':
+      return renderMeta(block, ctx, lines, top);
+    case 'versus':
+      return renderVersus(block, ctx, lines, top);
+    case 'icontitle':
+      return renderIconTitle(block, ctx, lines, top);
+    case 'icondivider':
+      return renderIconDivider(block, ctx, top);
+    case 'score':
+      return renderScore(block, ctx, lines, top);
+    default:
+      return '';
+  }
+}
+
 function componentHeading(title, ctx) {
   if (!title) return '';
   return `<section style="margin:0 0 10px;font-size:${ctx.fs + 1}px;line-height:1.5;font-weight:700;color:${ctx.theme.heading};">${inline(title, ctx)}</section>`;
 }
 
 function renderCallout(block, ctx) {
+  const iconComponent = renderIconComponent(block, ctx);
+  if (iconComponent) return iconComponent;
   const theme = ctx.theme;
   const top = Math.round(ctx.fs * 1.45);
   const lines = componentLines(block);
@@ -633,6 +877,7 @@ export function plainText(markdown) {
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
     .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/:([a-zA-Z][a-zA-Z0-9-]{0,24})(?:\{[^{}]*\})?:/g, (match, name) => (hasGlyph(name) ? ' ' : match))
     .replace(/^\s*:::\s*\w*\s*/gm, ' ')
     .replace(/^\s*#{1,6}\s+/gm, '')
     .replace(/^\s*>\s?/gm, '')

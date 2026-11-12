@@ -5,12 +5,26 @@ import { COVER_STYLES, drawCover, coverToDataUrl, inferCoverStyle } from './cove
 import { api } from './api.js';
 import { STYLE_COMPONENTS, STYLE_CATEGORIES } from './components.js';
 import { htmlToMarkdown, docxToMarkdown } from './import.js';
+import {
+  GLYPH_GROUPS,
+  GLYPH_LIST,
+  GLYPH_COUNT,
+  DEFAULT_GLYPH_STYLE,
+  getGlyph,
+  searchGlyphs,
+  glyphSyntax,
+  renderGlyph,
+  resolveGlyphColor,
+} from './glyphs.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
 const CURRENT_KEY = 'mojian.current';
 const PREVIEW_KEY = 'mojian.preview';
 const STYLE_FAVORITES_KEY = 'mojian.style-favorites';
+const ICON_STUDIO_KEY = 'mojian.icon-studio';
+// 与 server.js 的草稿校验保持一致
+const HTML_CHAR_LIMIT = 20000;
 
 const state = {
   articles: [],
@@ -30,6 +44,12 @@ const state = {
   styleCategory: '全部',
   styleQuery: '',
   styleFavorites: loadStyleFavorites(),
+  styleMode: 'components',
+  iconQuery: '',
+  iconGroup: '常用',
+  iconSelected: 'star',
+  iconStyle: loadIconStudio(),
+  iconGridSignature: '',
 };
 
 const modalStack = [];
@@ -83,6 +103,8 @@ const TOOLBAR = [
   { sep: true },
   { action: 'code', icon: 'code', title: '代码块' },
   { action: 'callout', icon: 'callout', title: '提示卡片' },
+  { action: 'glyph', icon: 'shapes', title: '图标工坊（115 个图标）' },
+  { action: 'timeline', icon: 'timeline', title: '插入时间线' },
   { action: 'help', icon: 'help', title: '格式说明' },
 ];
 
@@ -271,6 +293,7 @@ function renderEditorMode() {
 
   $('#editorThemePill').textContent = pic ? '图片消息' : getTheme(article.themeId).name;
   $('#editorHint').textContent = pic ? '首图即封面 · 1–20 张 · 单张 ≤ 1MB' : 'Markdown · 富文本粘贴 · 截图上传';
+  $('#editorBudget').hidden = pic;
   $('#assetFootnote').textContent = pic
     ? '点击本机素材即可添加到贴图；公众号图库支持分页、多选。首图会成为封面。'
     : '点击本机素材即可插入正文；公众号图库支持分页、多选，且不会修改线上素材。';
@@ -467,8 +490,21 @@ function renderPreview({ resetScroll = false } = {}) {
   $('#editorStats').textContent = `${formatNumber(result.stats.chars)} 字`;
   $('#editorReading').textContent = `约 ${result.stats.reading} 分钟`;
   $('#editorImages').textContent = `${result.stats.images} 张图片`;
+  renderHtmlBudget(result.html.length);
   $('#editorThemePill').textContent = theme.name;
   $('#themeName').textContent = theme.name;
+}
+
+/** 图标组件比较占字符，这里实时显示草稿接口的 20000 字符余量 */
+function renderHtmlBudget(length) {
+  const chip = $('#editorBudget');
+  const ratio = length / HTML_CHAR_LIMIT;
+  chip.textContent = `HTML ${length > 999 ? `${(length / 1000).toFixed(1)}k` : length} / 20k`;
+  chip.classList.toggle('warn', ratio > 0.8 && ratio <= 1);
+  chip.classList.toggle('over', ratio > 1);
+  chip.title = ratio > 1
+    ? `正文 HTML ${length} 字符，已超过草稿接口 20000 上限，发布前请精简组件或拆分文章`
+    : `发布草稿时正文 HTML 上限 20000 字符，当前已用 ${Math.round(ratio * 100)}%`;
 }
 
 function picPreviewHtml(article) {
@@ -525,6 +561,30 @@ function renderThemeGrid() {
 
 function renderStyleCenter() {
   const theme = getTheme(state.current?.themeId || 'paper');
+  const icons = state.styleMode === 'icons';
+  $('#styleComponentView').hidden = icons;
+  $('#styleIconView').hidden = !icons;
+  // 图标工坊靠模式切换条当标题，收起面板大标题，把高度让给图标网格
+  $('.side-panel[data-panel="styles"]').classList.toggle('icons-mode', icons);
+  $('#styleModeComponentCount').textContent = String(STYLE_COMPONENTS.length);
+  $('#styleModeIconCount').textContent = String(GLYPH_COUNT);
+  $$('[data-style-mode]').forEach((button) => {
+    const active = button.dataset.styleMode === state.styleMode;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  const search = $('#styleSearch');
+  search.placeholder = icons ? '搜索图标：星、时间、箭头、star……' : '搜索标题、卡片、步骤……';
+  search.value = icons ? state.iconQuery : state.styleQuery;
+  $('#stylePanelDesc').textContent = icons
+    ? '调好样式后点图标即插入，跟随模板强调色，不占素材配额。'
+    : '点击插入到光标处，再替换占位文字。组件会继承当前模板和强调色。';
+
+  if (icons) {
+    renderIconStudio();
+    return;
+  }
+
   $('#styleCategories').innerHTML = STYLE_CATEGORIES.map((category) =>
     `<button class="${state.styleCategory === category ? 'active' : ''}" data-style-category="${category}" type="button">${category}</button>`
   ).join('');
@@ -533,7 +593,7 @@ function renderStyleCenter() {
     if (state.styleCategory === '收藏' && !state.styleFavorites.has(component.id)) return false;
     if (!['全部', '收藏'].includes(state.styleCategory) && component.category !== state.styleCategory) return false;
     if (!query) return true;
-    return `${component.name} ${component.category} ${component.description}`.toLowerCase().includes(query);
+    return `${component.name} ${component.category} ${component.description} ${component.keywords || ''}`.toLowerCase().includes(query);
   });
   $('#styleList').innerHTML = components.length ? components.map((component) => {
     const favorite = state.styleFavorites.has(component.id);
@@ -548,6 +608,176 @@ function renderStyleCenter() {
       <div class="style-card-body"><strong>${component.name}</strong><p>${component.description}</p><button class="style-insert" data-style-insert="${component.id}" type="button">${icon('plus', 12)}插入到正文</button></div>
     </article>`;
   }).join('') : '<p class="empty">没有找到匹配的样式，换个关键词试试。</p>';
+}
+
+/* ------------------------------- icon studio ------------------------------- */
+
+/** 图标预览用的调色板，和正文渲染保持同一套取色规则 */
+function iconPalette() {
+  const theme = getTheme(state.current?.themeId || 'paper');
+  const options = normalizeOptions(state.current?.options);
+  const accent = /^#[0-9a-f]{6}$/i.test(options.accent || '') ? options.accent : theme.accent;
+  return { accent, text: theme.text, muted: theme.muted, heading: theme.heading, line: theme.line, bg: theme.bg };
+}
+
+function loadIconStudio() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(ICON_STUDIO_KEY) || '{}');
+    const style = { ...DEFAULT_GLYPH_STYLE };
+    Object.keys(style).forEach((key) => {
+      if (saved[key] != null && saved[key] !== '') style[key] = saved[key];
+    });
+    ['size', 'tint', 'weight', 'gap', 'opacity'].forEach((key) => {
+      const value = Number(style[key]);
+      style[key] = Number.isFinite(value) ? value : DEFAULT_GLYPH_STYLE[key];
+    });
+    if (!['none', 'circle', 'square', 'outline'].includes(style.shape)) style.shape = 'none';
+    if (!['middle', 'baseline', 'text-bottom', 'top'].includes(style.align)) style.align = 'middle';
+    if (!/^(accent|text|muted|heading|line|#[0-9a-f]{6})$/i.test(String(style.color))) style.color = 'accent';
+    return style;
+  } catch {
+    return { ...DEFAULT_GLYPH_STYLE };
+  }
+}
+
+function saveIconStudio() {
+  localStorage.setItem(ICON_STUDIO_KEY, JSON.stringify(state.iconStyle));
+}
+
+function openIconStudio() {
+  if (isPic()) {
+    toast('贴图不支持图标排版，切换到文章后再使用', 'error');
+    return;
+  }
+  state.styleMode = 'icons';
+  activateSideTab('styles');
+  renderStyleCenter();
+  if (window.innerWidth <= 900) document.body.classList.add('sidebar-open');
+  revealIconGrid();
+}
+
+function renderIconStudio() {
+  const palette = iconPalette();
+  const style = state.iconStyle;
+  const glyph = getGlyph(state.iconSelected) || GLYPH_LIST[0];
+  state.iconSelected = glyph.id;
+  const color = resolveGlyphColor(style.color, palette);
+  const art = (size) => renderGlyph(glyph.id, { ...style, size, color });
+
+  // 预览台底色跟随模板，深色模板下也能看清图标
+  const stage = $('#iconStage');
+  stage.style.background = palette.bg;
+  stage.style.borderColor = palette.line;
+  $('#iconStageSolo').innerHTML = art(Math.min(48, Math.max(12, Number(style.size) || 18)));
+  const line = $('#iconStageLine');
+  line.style.color = palette.text;
+  line.style.background = palette.bg;
+  line.innerHTML = `${art(Number(style.size) || 18)}<span style="color:${palette.text}">图标和正文排在一起</span>`;
+  const name = $('#iconStageName');
+  name.textContent = `${glyph.name} · ${glyph.group}`;
+  name.style.color = palette.heading;
+  const syntax = glyphSyntax(glyph.id, style);
+  const chip = $('#iconStageSyntax');
+  chip.textContent = syntax;
+  chip.title = `${syntax}（点击复制）`;
+
+  const readouts = { iconSize: 'size', iconTint: 'tint', iconWeight: 'weight', iconGap: 'gap', iconOpacity: 'opacity' };
+  Object.entries(readouts).forEach(([id, key]) => {
+    const input = $(`#${id}`);
+    input.value = String(style[key]);
+    $(`#${id}Out`).textContent = String(style[key]);
+  });
+  $('#iconShape').value = style.shape;
+  $('#iconAlign').value = style.align;
+  $('#iconColorPick').value = /^#/.test(String(style.color)) ? style.color : palette.accent;
+  $('#btnIconColorFollow').textContent = style.color === 'accent' ? '已跟随强调色' : '跟随强调色';
+
+  const swatches = [
+    { value: 'accent', name: '跟随强调色', color: palette.accent, auto: true },
+    { value: 'heading', name: '标题色', color: palette.heading },
+    { value: 'text', name: '正文色', color: palette.text },
+    { value: 'muted', name: '辅助色', color: palette.muted },
+    ...[
+      { value: '#b5432a', name: '朱砂' },
+      { value: '#1d4ed8', name: '群青' },
+      { value: '#0f766e', name: '松绿' },
+      { value: '#b45309', name: '琥珀' },
+      { value: '#7c3aed', name: '紫藤' },
+    ].map((item) => ({ ...item, color: item.value })),
+  ];
+  $('#iconSwatches').innerHTML = swatches.map((swatch) => {
+    const active = String(style.color).toLowerCase() === swatch.value;
+    return `<button class="icon-swatch ${swatch.auto ? 'auto' : ''} ${active ? 'active' : ''}"
+      data-icon-color="${swatch.value}" style="background:${swatch.color}" type="button" title="${swatch.name}" aria-label="${swatch.name}" aria-pressed="${active}"></button>`;
+  }).join('');
+
+  const groups = ['全部', ...GLYPH_GROUPS];
+  $('#iconGroups').innerHTML = groups.map((group) =>
+    `<button class="${state.iconGroup === group ? 'active' : ''}" data-icon-group="${group}" type="button">${group}</button>`
+  ).join('');
+
+  renderIconGrid();
+}
+
+function renderIconGrid() {
+  const palette = iconPalette();
+  const style = state.iconStyle;
+  const color = resolveGlyphColor(style.color, palette);
+  const list = searchGlyphs(state.iconQuery, state.iconGroup);
+  // 网格里的图标固定 22px，只有影响外观的参数变化才重画，拖动尺寸滑杆不卡
+  const signature = [color, style.shape, style.tint, style.weight, style.opacity, state.iconGroup, state.iconQuery].join('|');
+  if (signature !== state.iconGridSignature || !$('#iconGrid').children.length) {
+    state.iconGridSignature = signature;
+    $('#iconGrid').innerHTML = list.length ? list.map((glyph) => `
+      <button class="icon-cell ${glyph.id === state.iconSelected ? 'active' : ''}" data-icon-id="${glyph.id}" type="button"
+        title="${escapeHtml(glyph.name)} · :${glyph.id}:">
+        <span class="icon-cell-art">${renderGlyph(glyph.id, { ...style, size: 22, gap: 0, color })}</span>
+        <span class="icon-cell-name">${escapeHtml(glyph.name)}</span>
+      </button>`).join('') : '<p class="icon-empty">没有找到匹配的图标，试试「星」「箭头」「时间」。</p>';
+  } else {
+    $$('.icon-cell').forEach((cell) => cell.classList.toggle('active', cell.dataset.iconId === state.iconSelected));
+  }
+  $('#iconFootnote').textContent = `共 ${GLYPH_COUNT} 个图标，当前显示 ${list.length} 个。点击即插入到光标处，Shift + 点击只选中不插入。图标由字符与 CSS 图形绘制，不使用图片与 SVG，复制到公众号不掉格式，也不占素材配额。`;
+}
+
+function setIconStyle(patch, { persist = true } = {}) {
+  state.iconStyle = { ...state.iconStyle, ...patch };
+  if (persist) saveIconStudio();
+  renderIconStudio();
+}
+
+/** 换分组或搜索后，把网格起点滚回吸顶卡片下方，免得停在列表末尾的空白处 */
+function revealIconGrid() {
+  const grid = $('#iconGrid');
+  const studio = $('.icon-studio');
+  const body = grid.closest('.side-body');
+  if (!body || !studio) return;
+  const offset = grid.getBoundingClientRect().top - body.getBoundingClientRect().top + body.scrollTop;
+  const target = Math.max(0, offset - studio.offsetHeight - 12);
+  if (body.scrollTop > target) body.scrollTop = target;
+}
+
+function insertGlyph(id = state.iconSelected) {
+  if (!state.current) return;
+  if (isPic()) {
+    toast('贴图不支持图标排版，切换到文章后再使用', 'error');
+    return;
+  }
+  const glyph = getGlyph(id);
+  if (!glyph) return;
+  insertText(`${glyphSyntax(glyph.id, state.iconStyle)} `);
+  toast(`已插入图标「${glyph.name}」`, 'success', 1800);
+}
+
+function insertComponent(id) {
+  const component = STYLE_COMPONENTS.find((item) => item.id === id);
+  if (!component || !state.current) return;
+  if (isPic()) {
+    toast('贴图不支持排版组件，切换到文章后再使用', 'error');
+    return;
+  }
+  insertText(`\n\n${component.sample}\n\n`);
+  toast(`已插入「${component.name}」，请替换占位文字`, 'success');
 }
 
 function renderOptions() {
@@ -1279,6 +1509,12 @@ async function handleAction(action) {
     }
     case 'callout':
       insertText('\n\n:::tip 小提示\n在这里写一段提示。\n:::\n\n', '在这里写一段提示。');
+      break;
+    case 'glyph':
+      openIconStudio();
+      break;
+    case 'timeline':
+      insertComponent('icon-timeline');
       break;
     case 'image':
       openMediaPicker((item) => insertImage(item));
@@ -3943,6 +4179,10 @@ function showHelp() {
     });
     return;
   }
+  const iconComponents = STYLE_COMPONENTS.filter((component) => component.category === '图标');
+  const iconStrip = ['star', 'check-circle', 'clock', 'bulb', 'right', 'heart', 'target', 'flag']
+    .map((id) => renderGlyph(id, { size: 20, shape: 'circle', tint: 12, color: resolveGlyphColor('accent', iconPalette()) }))
+    .join('');
   openModal({
     title: '格式说明',
     subtitle: '左侧写 Markdown，右侧实时预览；复制时全部转成内联样式。',
@@ -3969,6 +4209,27 @@ function showHelp() {
           <tr><td>| 表头 | 表头 |<br>| --- | --- |</td><td>表格，支持左右/居中对齐</td></tr>
         </table>
         <p class="panel-footnote">把截图直接粘贴到编辑器，会自动上传到素材库并插入正文。⌘S 保存，⌘K 插入链接。</p>
+      </div>
+      <div class="help-section">
+        <h4>行内图标</h4>
+        <div class="help-icon-strip">${iconStrip}</div>
+        <table class="help-table">
+          <tr><td>:star: :clock: :check:</td><td>在句子里插入图标，共 ${GLYPH_COUNT} 个，颜色默认跟随强调色</td></tr>
+          <tr><td>:star{24,circle}:</td><td>参数依次为 尺寸、底座、颜色、底色浓度</td></tr>
+          <tr><td>:star{24,circle,#1d4ed8,18}:</td><td>底座可用 none / circle / square / outline</td></tr>
+          <tr><td>:star{weight=700,gap=6,opacity=80}:</td><td>还可调线条字重、与文字间距、不透明度、align 对齐</td></tr>
+        </table>
+        <p class="panel-footnote">不想记语法就打开「样式 → 图标工坊」：左侧滑杆实时预览，点图标即插入。图标用字符与 CSS 图形绘制，不是图片，不占公众号素材配额。</p>
+      </div>
+      <div class="help-section">
+        <h4>图标结构化组件</h4>
+        <table class="help-table">
+          ${iconComponents.map((component) => {
+            const kind = (component.sample.match(/^:::(\w+)/) || [, ''])[1];
+            return `<tr><td>:::${kind} 标题<br>一行一条，用 | 分栏<br>:::</td><td><strong>${component.name}</strong> — ${component.description}</td></tr>`;
+          }).join('')}
+        </table>
+        <p class="panel-footnote">完整示例在「样式 → 排版组件 → 图标」里，点一下就插入带占位内容的模板。</p>
       </div>`,
     footer: `<button class="btn btn-dark" data-footer-close type="button">知道了</button>`,
   });
@@ -4245,6 +4506,13 @@ function bindStaticEvents() {
   });
 
   // style library
+  $('#styleMode').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-style-mode]');
+    if (!button || button.dataset.styleMode === state.styleMode) return;
+    state.styleMode = button.dataset.styleMode;
+    renderStyleCenter();
+    if (state.styleMode === 'icons') revealIconGrid();
+  });
   $('#styleCategories').addEventListener('click', (event) => {
     const button = event.target.closest('[data-style-category]');
     if (!button) return;
@@ -4252,8 +4520,14 @@ function bindStaticEvents() {
     renderStyleCenter();
   });
   $('#styleSearch').addEventListener('input', (event) => {
-    state.styleQuery = event.target.value;
-    renderStyleCenter();
+    if (state.styleMode === 'icons') {
+      state.iconQuery = event.target.value;
+      renderIconGrid();
+      revealIconGrid();
+    } else {
+      state.styleQuery = event.target.value;
+      renderStyleCenter();
+    }
   });
   $('#styleList').addEventListener('click', (event) => {
     const favoriteButton = event.target.closest('[data-style-favorite]');
@@ -4267,10 +4541,66 @@ function bindStaticEvents() {
     }
     const insertButton = event.target.closest('[data-style-insert]');
     if (!insertButton || !state.current) return;
-    const component = STYLE_COMPONENTS.find((item) => item.id === insertButton.dataset.styleInsert);
-    if (!component) return;
-    insertText(`\n\n${component.sample}\n\n`);
-    toast(`已插入「${component.name}」，请替换占位文字`, 'success');
+    insertComponent(insertButton.dataset.styleInsert);
+  });
+
+  // icon studio
+  $('#iconGroups').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-icon-group]');
+    if (!button) return;
+    state.iconGroup = button.dataset.iconGroup;
+    renderIconStudio();
+    revealIconGrid();
+  });
+  $('#iconGrid').addEventListener('click', (event) => {
+    const cell = event.target.closest('[data-icon-id]');
+    if (!cell) return;
+    state.iconSelected = cell.dataset.iconId;
+    renderIconStudio();
+    if (!event.shiftKey) insertGlyph(state.iconSelected);
+  });
+  $('#iconSwatches').addEventListener('click', (event) => {
+    const button = event.target.closest('[data-icon-color]');
+    if (!button) return;
+    setIconStyle({ color: button.dataset.iconColor });
+  });
+  const iconRanges = [
+    ['#iconSize', 'size'],
+    ['#iconTint', 'tint'],
+    ['#iconWeight', 'weight'],
+    ['#iconGap', 'gap'],
+    ['#iconOpacity', 'opacity'],
+  ];
+  iconRanges.forEach(([selector, key]) => {
+    $(selector).addEventListener('input', (event) => setIconStyle({ [key]: Number(event.target.value) }));
+  });
+  $('#iconShape').addEventListener('change', (event) => setIconStyle({ shape: event.target.value }));
+  $('#iconAlign').addEventListener('change', (event) => setIconStyle({ align: event.target.value }));
+  $('#iconColorPick').addEventListener('input', (event) => setIconStyle({ color: event.target.value }));
+  $('#btnIconColorFollow').addEventListener('click', () => setIconStyle({ color: 'accent' }));
+  $('#btnIconInsert').addEventListener('click', () => insertGlyph());
+  const copyIconSyntax = async () => {
+    const syntax = glyphSyntax(state.iconSelected, state.iconStyle);
+    try {
+      await navigator.clipboard.writeText(syntax);
+      toast(`已复制 ${syntax}`, 'success', 2200);
+    } catch (err) {
+      toast(`复制失败：${err.message}`, 'error');
+    }
+  };
+  $('#btnIconCopy').addEventListener('click', copyIconSyntax);
+  $('#iconStageSyntax').addEventListener('click', copyIconSyntax);
+  $('#btnIconRandom').addEventListener('click', () => {
+    const pool = searchGlyphs(state.iconQuery, state.iconGroup);
+    if (!pool.length) return;
+    const others = pool.filter((glyph) => glyph.id !== state.iconSelected);
+    const pick = (others.length ? others : pool)[Math.floor(Math.random() * (others.length || pool.length))];
+    state.iconSelected = pick.id;
+    renderIconStudio();
+  });
+  $('#btnIconReset').addEventListener('click', () => {
+    setIconStyle({ ...DEFAULT_GLYPH_STYLE });
+    toast('图标样式已恢复默认', 'success', 1800);
   });
 
   // options
