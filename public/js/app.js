@@ -815,7 +815,7 @@ function renderArticleList() {
   }
   const list = visibleArticles().sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
   if (!list.length) {
-    $('#articleList').innerHTML = '<p class="empty">这个账号还没有文章，点上方「新建」开始。</p>';
+    $('#articleList').innerHTML = '<p class="empty">这个账号还没有文章，点上方「新建」或「导入文档」开始。</p>';
     return;
   }
   $('#articleList').innerHTML = list
@@ -4327,7 +4327,10 @@ function bindStaticEvents() {
     button.addEventListener('click', () => {
       if (button.disabled) return;
       activateSideTab(button.dataset.tab);
-      if (window.innerWidth <= 900) document.body.classList.remove('sidebar-open');
+      // 窄屏抽屉：模板 / 样式选完即应用，自动收起；文章 / 素材 / 封面还要在面板里继续操作，保持打开
+      if (window.innerWidth <= 900 && ['themes', 'styles'].includes(button.dataset.tab)) {
+        document.body.classList.remove('sidebar-open');
+      }
     });
   });
 
@@ -4874,6 +4877,12 @@ function bindStaticEvents() {
     newMenu.hidden = !newMenu.hidden;
   });
   newMenu.addEventListener('click', (event) => {
+    const importButton = event.target.closest('[data-import]');
+    if (importButton) {
+      newMenu.hidden = true;
+      $(importButton.dataset.import === 'md' ? '#importMdInput' : '#importInput').click();
+      return;
+    }
     const button = event.target.closest('[data-new-kind]');
     if (!button) return;
     newMenu.hidden = true;
@@ -4883,7 +4892,8 @@ function bindStaticEvents() {
     if (!event.target.closest('.new-article-wrap')) newMenu.hidden = true;
   });
   $('#btnImport').addEventListener('click', () => $('#importInput').click());
-  $('#importInput').addEventListener('change', async (event) => {
+  $('#btnImportMd').addEventListener('click', () => $('#importMdInput').click());
+  const onImportFileChange = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
     const input = event.target;
@@ -4920,7 +4930,9 @@ function bindStaticEvents() {
       input.value = '';
       input.disabled = false;
     }
-  });
+  };
+  $('#importInput').addEventListener('change', onImportFileChange);
+  $('#importMdInput').addEventListener('change', onImportFileChange);
   $('#btnExportMd').addEventListener('click', exportMarkdown);
   $('#btnExportHtml').addEventListener('click', exportHtml);
   $('#btnCopyHtml').addEventListener('click', copyHtmlSource);

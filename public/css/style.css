@@ -1842,6 +1842,10 @@ body:not(.preview-open) .preview-pane {
 
 /* ------------------------------- article list ------------------------------ */
 
+.article-import-row {
+  margin: 0 0 10px;
+}
+
 .article-list {
   display: flex;
   flex-direction: column;
@@ -4528,6 +4532,12 @@ body:not(.preview-open) .preview-pane {
   color: var(--muted);
   font-size: 9.5px;
   line-height: 1.5;
+}
+
+.new-menu-sep {
+  height: 1px;
+  margin: 5px 8px;
+  background: var(--line);
 }
 
 .title-count {
