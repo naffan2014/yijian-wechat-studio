@@ -288,7 +288,7 @@ function renderEditorMode() {
   titleCount.textContent = pic ? `${(article.title || '').length} / 32` : '';
 
   const titleInput = $('#titleInput');
-  titleInput.maxLength = pic ? 32 : 64;
+  titleInput.maxLength = 32;
   titleInput.placeholder = pic ? '输入贴图标题' : '输入文章标题';
 
   $('#editorThemePill').textContent = pic ? '图片消息' : getTheme(article.themeId).name;
@@ -2189,8 +2189,8 @@ function openAccountEditor(account, onSaved) {
       </div>
       <div class="field">
         <label>默认作者</label>
-        <input name="author" value="${escapeHtml(acc.author)}" maxlength="40" placeholder="作者名" />
-        <span class="hint">微信作者栏建议不超过 8 个字符</span>
+        <input name="author" value="${escapeHtml(acc.author)}" maxlength="16" placeholder="作者名" />
+        <span class="hint">微信作者栏最多 16 个字符</span>
       </div>
       <div class="field">
         <label>AppID</label>
@@ -2766,7 +2766,7 @@ function openPicPublish() {
       </div>
       <div class="field">
         <label>作者</label>
-        <input name="pubAuthor" maxlength="8" value="${escapeHtml(author)}" placeholder="作者名" />
+        <input name="pubAuthor" maxlength="16" value="${escapeHtml(author)}" placeholder="作者名" />
       </div>
       <div class="field">
         <label>图片</label>
@@ -2897,12 +2897,12 @@ function openPublish() {
     <div class="form-grid">
       <div class="field full">
         <label>标题</label>
-        <input name="pubTitle" maxlength="64" value="${escapeHtml(article.title || '')}" placeholder="文章标题" />
-        <span class="hint">公众号标题最多 64 字符 · 当前 <span id="pubTitleCount">${(article.title || '').length}</span></span>
+        <input name="pubTitle" maxlength="32" value="${escapeHtml(article.title || '')}" placeholder="文章标题" />
+        <span class="hint">公众号标题最多 32 字符 · 当前 <span id="pubTitleCount">${(article.title || '').length}</span></span>
       </div>
       <div class="field">
         <label>作者</label>
-        <input name="pubAuthor" maxlength="8" value="${escapeHtml(author)}" placeholder="作者名" />
+        <input name="pubAuthor" maxlength="16" value="${escapeHtml(author)}" placeholder="作者名" />
       </div>
       <div class="field">
         <label>摘要</label>
@@ -3011,7 +3011,7 @@ function openPublish() {
         const sourceUrl = root.querySelector('[name="pubSource"]').value.trim();
 
         if (!title) return showError('请填写文章标题。');
-        if (title.length > 64) return showError(`标题最多 64 个字符，当前 ${title.length} 个。`);
+        if (title.length > 32) return showError(`标题最多 32 个字符，当前 ${title.length} 个。`);
         if (!cover) return showError('请先选择或生成一张封面。');
         const appId = root.querySelector('[name="appId"]')?.value.trim();
         const secret = root.querySelector('[name="appSecret"]')?.value.trim();

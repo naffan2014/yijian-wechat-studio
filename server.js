@@ -44,6 +44,10 @@ const SAMPLE_IMAGES = [
 const PIC_MAX_IMAGES = 20;
 const PIC_MAX_COPY = 1000;
 const PIC_MAX_TITLE = 32;
+// 以下上限对齐 draft/add 官方文档（2026-11 版）：标题 32 字、作者 16 字、摘要 120 字
+const NEWS_MAX_TITLE = 32;
+const MAX_AUTHOR = 16;
+const MAX_DIGEST = 120;
 const PIC_IMAGE_LIMIT = 1024 * 1024; // 贴图按公众号图片消息的保守上限做校验
 
 let articles = [];
@@ -470,9 +474,9 @@ async function handlePicDraft(body) {
     return image;
   });
 
-  if (author.length > 8) {
-    author = author.slice(0, 8);
-    warnings.push('作者名超过 8 个字符，已按微信限制截断');
+  if (author.length > MAX_AUTHOR) {
+    author = author.slice(0, MAX_AUTHOR);
+    warnings.push(`作者名超过 ${MAX_AUTHOR} 个字符，已按微信限制截断`);
   }
 
   const token = await wechat.getToken(activeAccount());
@@ -552,7 +556,7 @@ async function handleArticlePublish(body) {
   const warnings = [];
 
   if (!title) throw new ApiError(400, '请先填写文章标题');
-  if (title.length > 64) throw new ApiError(400, `公众号标题最多 64 个字符，当前 ${title.length} 个`);
+  if (title.length > NEWS_MAX_TITLE) throw new ApiError(400, `公众号标题最多 ${NEWS_MAX_TITLE} 个字符，当前 ${title.length} 个`);
   if (!content.trim()) throw new ApiError(400, '正文为空，无法发布');
   if (content.length > 20000) {
     throw new ApiError(400, `正文 HTML 有 ${content.length} 个字符，超过公众号草稿 20000 字符的限制，请精简排版或拆分文章`);
@@ -561,9 +565,9 @@ async function handleArticlePublish(body) {
     throw new ApiError(400, '正文 HTML 超过 1MB，请精简图片或拆分文章');
   }
 
-  if (author.length > 8) {
-    author = author.slice(0, 8);
-    warnings.push('作者名超过 8 个字符，已按微信限制截断');
+  if (author.length > MAX_AUTHOR) {
+    author = author.slice(0, MAX_AUTHOR);
+    warnings.push(`作者名超过 ${MAX_AUTHOR} 个字符，已按微信限制截断`);
   }
 
   // 前端发布表单使用 cover 字段，旧接口/脚本可能使用 coverUrl，两者都兼容
@@ -594,7 +598,7 @@ async function handleArticlePublish(body) {
   const draft = await wechat.addDraft(token, {
     title,
     author,
-    digest: digest.slice(0, 120),
+    digest: digest.slice(0, MAX_DIGEST),
     content: prepared.content,
     content_source_url: sourceUrl,
     thumb_media_id: cover.media_id,
